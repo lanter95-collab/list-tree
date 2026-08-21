@@ -1,0 +1,1551 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>任務樹狀清單</title>
+<style>
+  :root{
+    --bg: #F4F3EF;
+    --paper: #FFFFFF;
+    --ink: #1E2223;
+    --line: #1E2223;
+    --navy: #1B3A6B;
+    --navy-dim: #14294E;
+    --teal: #2F6E68;
+    --red: #B23A2F;
+    --slate: #767A76;
+    --border: #DEDCD3;
+    --radius: 6px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:
+      linear-gradient(var(--bg) 1px, transparent 1px) 0 0/100% 28px,
+      var(--bg);
+    color: var(--ink);
+    font-family: 'Inter', -apple-system, "Segoe UI", "PingFang TC", "Microsoft JhengHei", sans-serif;
+    min-height: 100vh;
+    padding: 28px 8px 80px;
+  }
+  .wrap{ max-width: none; margin: 0; }
+
+  header{
+    margin-bottom: 14px;
+    border-bottom: 2px solid var(--ink);
+    padding-bottom: 8px;
+  }
+  h1{
+    font-family: 'Barlow Condensed', 'Inter', sans-serif;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    font-size: 28px;
+    line-height: 1;
+    margin: 0;
+    padding: 2px 4px;
+    outline: none;
+    cursor: text;
+    display: block;
+    border-radius: 4px;
+  }
+  h1[contenteditable="true"]{
+    background: #FFF;
+    box-shadow: 0 0 0 1.5px var(--navy-dim);
+  }
+
+  .toolbar{
+    display:flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 14px 0 18px;
+  }
+  .toolbar button{
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12.5px;
+    background: var(--paper);
+    color: var(--ink);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 8px 15px;
+    cursor: pointer;
+    letter-spacing: .01em;
+  }
+  .toolbar button:hover{ border-color: var(--ink); }
+  .toolbar button.primary{ background: var(--navy); color:#fff; border-color: var(--navy); }
+  .toolbar button.primary:hover{ background: var(--navy-dim); }
+  .toolbar button.danger{ color: var(--red); }
+  .toolbar button.danger:hover{ border-color: var(--red); background:#FBEEEC; }
+
+  .status{
+    font-family:'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: var(--slate);
+    margin: -8px 0 14px 4px;
+    min-height: 14px;
+  }
+
+  .collapse-all-bar{
+    margin: -2px 0 10px 2px;
+    font-size: 13px;
+    color: var(--ink);
+  }
+  .collapse-all-bar label{
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .collapse-all-bar input[type=checkbox]{
+    width: 16px; height: 16px;
+    margin-top: 0;
+  }
+
+  .panel{
+    background: var(--paper);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 18px 14px 22px;
+    box-shadow: 0 1px 0 var(--border);
+    min-height: 120px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .panel.drag-target{ box-shadow: 0 0 0 2px var(--teal) inset; }
+
+  ul.tree{ list-style:none; margin:0; padding:0; }
+  ul.tree ul.tree{ margin-left: 22px; }
+
+  ul.tree li{
+    position: relative;
+    padding-left: 22px;
+    margin-top: 2px;
+  }
+  ul.tree > li::after{
+    content:'';
+    position:absolute;
+    left:0; top:0;
+    width:0;
+    height: 100%;
+    border-left: 1.5px solid var(--line);
+  }
+  ul.tree > li:last-child::after{
+    height: 20px;
+  }
+  ul.tree > li::before{
+    content:'';
+    position:absolute;
+    left:0; top:20px;
+    width: 16px;
+    height:0;
+    border-top: 1.5px solid var(--line);
+  }
+  .root-list{ margin-left: 0; }
+  .root-list > li::after, .root-list > li::before{ display:none; }
+  .root-list > li{ padding-left: 0; }
+
+  .row{
+    display:flex;
+    align-items:flex-start;
+    gap: 3px;
+    padding: 3px 6px;
+    border-radius: 5px;
+    transition: background .12s;
+    width: max-content;
+    min-width: 100%;
+  }
+  .row:hover{ background: #E7E4DA; }
+  .row.drop-before{ box-shadow: 0 -2px 0 0 var(--teal); }
+  .row.drop-after{ box-shadow: 0 2px 0 0 var(--teal); }
+  .row.drop-inside{ background: #EAF3F2; box-shadow: 0 0 0 1.5px var(--teal) inset; }
+
+  .tri-end{
+    display: inline-block;
+    margin-left: 8px;
+    color: var(--slate);
+    font-size: 11px;
+    font-weight: 400;
+    user-select: none;
+    vertical-align: 1px;
+  }
+
+  input[type=checkbox]{
+    width: 20px; height: 20px;
+    margin-top: 4px;
+    accent-color: var(--teal);
+    flex-shrink: 0;
+    cursor: pointer;
+  }
+
+  .drag-ghost{
+    position: fixed;
+    z-index: 200;
+    background: var(--navy);
+    color: #fff;
+    padding: 7px 12px;
+    border-radius: 6px;
+    font-size: 12.5px;
+    max-width: 220px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    pointer-events: none;
+    box-shadow: 0 6px 16px rgba(0,0,0,0.28);
+  }
+  li.dragging-source > .row{ opacity: 0.35; }
+
+  .text{
+    flex: 1;
+    min-width: 0;
+    font-size: 14.5px;
+    line-height: 1.5;
+    padding: 2px 4px;
+    border-radius: 4px;
+    white-space: pre;
+    cursor: pointer;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  .text a.task-link{
+    color: var(--teal);
+    text-decoration: underline;
+    word-break: break-all;
+    cursor: pointer;
+    user-select: text;
+  }
+
+  li[data-depth="0"] > .row .text{
+    font-weight: 700;
+    font-family: 'Barlow Condensed','Inter',sans-serif;
+    font-size: 17px;
+    letter-spacing: .01em;
+  }
+  li[data-depth="0"] > .row .text:not(.checked){ color: var(--navy); }
+  .text.checked{
+    color: var(--slate);
+    text-decoration: line-through;
+    text-decoration-color: var(--border);
+    font-weight: 400 !important;
+  }
+
+  .btnrow{ display:flex; gap:5px; flex-shrink:0; margin-top:0; }
+  .iconbtn{
+    width: 27px; height: 27px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--paper);
+    color: var(--slate);
+    font-size: 15px;
+    line-height: 1;
+    cursor: pointer;
+    display:flex; align-items:center; justify-content:center;
+    font-family: monospace;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .iconbtn.edit:hover{ border-color: var(--navy); color: var(--navy); }
+  .iconbtn.add:hover{ border-color: var(--teal); color: var(--teal); }
+  .iconbtn.del:hover{ border-color: var(--red); color: var(--red); }
+
+  .empty{
+    color: var(--slate);
+    font-size: 13.5px;
+    padding: 10px 4px 4px;
+  }
+
+  /* ---- 新增／編輯任務彈窗 ---- */
+  .overlay{
+    position: fixed; inset: 0;
+    background: rgba(30,34,35,0.35);
+    display:flex; align-items:center; justify-content:center;
+    z-index: 50;
+    padding: 16px;
+    overflow-y: auto;
+  }
+  .overlay.hidden{ display:none; }
+  .modal{
+    background: var(--paper);
+    border-radius: 8px;
+    padding: 22px 22px 18px;
+    width: 100%;
+    max-width: 380px;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.18);
+    margin: auto;
+  }
+  .modal h3{
+    margin: 0 0 16px;
+    font-family: 'Barlow Condensed','Inter',sans-serif;
+    font-size: 18px;
+  }
+  .modal label{
+    display:block;
+    font-size: 12px;
+    color: var(--slate);
+    margin-bottom: 4px;
+    font-family: 'IBM Plex Mono', monospace;
+  }
+  .modal input[type=date], .modal input[type=text], .modal select, .modal textarea{
+    width: 100%;
+    font-size: 14px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    margin-bottom: 12px;
+    font-family: inherit;
+  }
+  .modal textarea{
+    resize: vertical;
+    min-height: 64px;
+    line-height: 1.5;
+  }
+  .modal input:focus, .modal select:focus, .modal textarea:focus{ outline: none; border-color: var(--navy-dim); }
+  .date-opts{
+    display:flex;
+    gap: 16px;
+    margin: -4px 0 12px;
+  }
+  .date-opts label{
+    display:flex;
+    align-items:center;
+    gap: 5px;
+    font-size: 13px;
+    color: var(--ink);
+    font-family: inherit;
+    margin-bottom: 0;
+    cursor: pointer;
+  }
+  .date-opts input[type=checkbox]{ width:15px; height:15px; margin-top:0; }
+  .modal-actions{ display:flex; justify-content:space-between; align-items:center; gap: 8px; margin-top: 4px; }
+  .modal-actions .left{ display:flex; }
+  .modal-actions .right{ display:flex; gap:8px; }
+  .modal-actions button{
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12.5px;
+    padding: 8px 16px;
+    border-radius: 999px;
+    cursor: pointer;
+  }
+  .modal-actions .cancel{ background: var(--paper); border: 1px solid var(--border); color: var(--slate); }
+  .modal-actions .confirm{ background: var(--navy); border: 1px solid var(--navy); color:#fff; }
+  .modal-actions .confirm:hover{ background: var(--navy-dim); }
+  .modal-actions .delete{ background: var(--paper); border: 1px solid var(--red); color: var(--red); }
+  .modal-actions .delete:hover{ background: #FBEEEC; }
+
+  /* ---- 富文字工具列 ---- */
+  .rte-toolbar{
+    display:flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: -2px 0 8px;
+  }
+  .rte-btn{
+    position: relative;
+    width: 30px; height: 30px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--paper);
+    color: var(--ink);
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+    display:flex; align-items:center; justify-content:center;
+    overflow: hidden;
+    font-family: inherit;
+  }
+  .rte-btn:hover{ border-color: var(--navy-dim); }
+  .rte-btn b, .rte-btn i, .rte-btn u{ pointer-events:none; }
+  .rte-color-icon, .rte-highlight-icon{
+    pointer-events:none;
+    font-weight:700;
+    font-size:13px;
+    border-bottom: 3px solid var(--red);
+    line-height:1.1;
+  }
+  .rte-highlight-icon{ border-bottom-color:#F2C230; background:none; }
+  .rte-color-input{
+    position:absolute; inset:0;
+    width:100%; height:100%;
+    opacity:0; cursor:pointer; border:none; padding:0;
+  }
+  .rte-editor{
+    width: 100%;
+    min-height: 64px;
+    max-height: 260px;
+    overflow-y: auto;
+    font-size: 14px;
+    line-height: 1.5;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    margin-bottom: 12px;
+    font-family: inherit;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .rte-editor:focus{ outline:none; border-color: var(--navy-dim); }
+  .rte-editor:empty:not(:focus):before{
+    content: attr(data-placeholder);
+    color: var(--slate);
+  }
+
+  /* ---- 任務關聯（黃底色）---- */
+  .text .task-ref{
+    background: #FFF3A0;
+    border-radius: 2px;
+    padding: 0 2px;
+    cursor: pointer;
+    text-decoration: underline dotted;
+    text-decoration-color: #C9A62A;
+  }
+  .row.ref-flash{
+    animation: refFlash 2s ease;
+  }
+  @keyframes refFlash{
+    0%{ background: #FFE58A; }
+    100%{ background: transparent; }
+  }
+
+  /* ---- 任務關聯選擇彈窗 ---- */
+  .link-modal{ max-width: 340px; }
+  #linkSearchInput{ margin-bottom: 8px; }
+  .link-results{
+    max-height: 240px;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    margin-bottom: 12px;
+  }
+  .link-result-item{
+    padding: 8px 10px;
+    font-size: 13.5px;
+    cursor: pointer;
+    border-bottom: 1px solid var(--border);
+  }
+  .link-result-item:last-child{ border-bottom:none; }
+  .link-result-item:hover{ background: #F7F6F2; }
+
+  @media print{
+    body{ background: #fff; padding: 0; }
+    .wrap{ max-width: none; margin: 0; }
+    .toolbar, .status, .btnrow, .tri-end, .collapse-all-bar{ display:none !important; }
+    .panel{ border:none; box-shadow:none; padding:0; overflow: visible; }
+    .row{ width: auto !important; min-width: 0 !important; }
+    .text{ white-space: pre-wrap !important; word-break: break-word; overflow-wrap: break-word; }
+    input[type=checkbox]{ accent-color: #000; }
+    li[data-depth="0"] > .row .text:not(.checked){ color:#000; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1 id="titleEl">任務樹狀清單</h1>
+  </header>
+
+  <div class="toolbar">
+    <button class="primary" id="addRootBtn">新增</button>
+    <button id="saveBtn">儲存</button>
+    <button id="loadBtn">讀取</button>
+    <button id="printBtn">列印</button>
+    <button class="danger" id="clearAllBtn">清除</button>
+    <button id="clearDoneBtn">清除完成</button>
+    <button id="syncCodeBtn">雲端代碼</button>
+  </div>
+  <input type="file" id="fileInput" accept="application/json" style="display:none;">
+
+  <div class="collapse-all-bar">
+    <label><input type="checkbox" id="collapseAllToggle"> 全隱藏</label>
+  </div>
+
+  <div class="status" id="statusLine"></div>
+
+  <div class="panel" id="panel">
+    <ul class="tree root-list" id="treeRoot"></ul>
+    <div class="empty" id="emptyMsg" style="display:none;">目前沒有任務，點上方「新增」建立第一個主任務。</div>
+  </div>
+</div>
+
+<div class="overlay hidden" id="overlay">
+  <div class="modal">
+    <h3 id="modalTitle">新增任務</h3>
+
+    <label for="dateInput">日期（預設為今天，可自行修改）</label>
+    <input type="date" id="dateInput">
+
+    <div class="date-opts">
+      <label><input type="checkbox" id="dateFront"> 在前</label>
+      <label><input type="checkbox" id="dateBack"> 在後</label>
+    </div>
+
+    <label for="numberingSelect">編號（選填）</label>
+    <select id="numberingSelect">
+      <option value="none">不編號</option>
+      <option value="number">1. 2. 3.</option>
+      <option value="upper">A. B. C.</option>
+      <option value="lower">a. b. c.</option>
+      <option value="circle">① ② ③</option>
+      <option value="chinese">一. 二. 三.</option>
+    </select>
+
+    <label for="textInput">內容</label>
+    <div class="rte-toolbar">
+      <button type="button" class="rte-btn" id="rteBold" title="粗體"><b>B</b></button>
+      <button type="button" class="rte-btn" id="rteItalic" title="斜體"><i>I</i></button>
+      <button type="button" class="rte-btn" id="rteUnderline" title="底線"><u>U</u></button>
+      <button type="button" class="rte-btn" id="rteColorBtn" title="文字顏色">
+        <span class="rte-color-icon">A</span>
+        <input type="color" id="rteColorInput" class="rte-color-input" value="#B23A2F">
+      </button>
+      <button type="button" class="rte-btn" id="rteHighlightBtn" title="文字背景色">
+        <span class="rte-highlight-icon">A</span>
+        <input type="color" id="rteHighlightInput" class="rte-color-input" value="#FFF176">
+      </button>
+      <button type="button" class="rte-btn" id="rteLink" title="關聯到其他任務">🔗</button>
+      <button type="button" class="rte-btn" id="rteClear" title="清除格式">⨯</button>
+    </div>
+    <div id="textInput" class="rte-editor" contenteditable="true" data-placeholder="輸入任務內容，按 Enter 直接新增，Shift+Enter 換行"></div>
+
+    <div class="modal-actions">
+      <div class="left"></div>
+      <div class="right">
+        <button class="cancel" id="modalCancel">取消</button>
+        <button class="confirm" id="modalConfirm">新增</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="overlay hidden" id="linkOverlay">
+  <div class="modal link-modal">
+    <h3>選擇要關聯的任務</h3>
+    <input type="text" id="linkSearchInput" placeholder="輸入關鍵字搜尋任務…">
+    <div id="linkResultsList" class="link-results"></div>
+    <div class="modal-actions">
+      <div class="left"></div>
+      <div class="right"><button class="cancel" id="linkCancelBtn">取消</button></div>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js";
+import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js";
+import { getFirestore, doc, setDoc, onSnapshot, enableIndexedDbPersistence } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
+
+const STORAGE_KEY = 'task-tree-data-v3';
+let state = { title: '任務樹狀清單', tasks: [] };
+let saveTimer = null;
+let dragId = null;
+let formMode = 'addRoot';   // 'addRoot' | 'addChild' | 'edit'
+let formParentId = null;
+let formNode = null;
+const LONG_PRESS_MS = 550;
+
+function uid(){ return 'n' + Math.random().toString(36).slice(2,10); }
+function pad2(n){ return n.toString().padStart(2,'0'); }
+function todayStr(){
+  const d = new Date();
+  return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
+}
+function escapeHtml(str){
+  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+/* node.content 現在是（已消毒過的）HTML 字串，不再是純文字，
+   所以自動連結網址時必須用 DOM 走訪文字節點，而不是整段字串跳脫。 */
+function linkifyHtml(html){
+  const container = document.createElement('div');
+  container.innerHTML = html;
+  const urlRegex = /((https?:\/\/|www\.)[^\s<>"']+)/gi;
+  function walk(node){
+    if(node.nodeType === 3){
+      const text = node.nodeValue;
+      urlRegex.lastIndex = 0;
+      if(!urlRegex.test(text)) return;
+      urlRegex.lastIndex = 0;
+      const frag = document.createDocumentFragment();
+      let lastIndex = 0;
+      let m;
+      while((m = urlRegex.exec(text)) !== null){
+        if(m.index > lastIndex) frag.appendChild(document.createTextNode(text.slice(lastIndex, m.index)));
+        const match = m[0];
+        const href = match.toLowerCase().startsWith('http') ? match : 'https://' + match;
+        const a = document.createElement('a');
+        a.href = href; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.className = 'task-link';
+        a.textContent = match;
+        frag.appendChild(a);
+        lastIndex = m.index + match.length;
+      }
+      if(lastIndex < text.length) frag.appendChild(document.createTextNode(text.slice(lastIndex)));
+      node.parentNode.replaceChild(frag, node);
+    } else if(node.nodeType === 1 && node.tagName !== 'A'){
+      Array.from(node.childNodes).forEach(walk);
+    }
+  }
+  Array.from(container.childNodes).forEach(walk);
+  return container.innerHTML;
+}
+function stripHtml(html){
+  const d = document.createElement('div');
+  d.innerHTML = html || '';
+  return d.textContent || '';
+}
+/* 儲存內容前先消毒：只留白名單標籤與必要屬性，避免存入來路不明的 HTML／腳本 */
+const RTE_ALLOWED_TAGS = new Set(['B','STRONG','I','EM','U','SPAN','BR','A']);
+function sanitizeContentHtml(html){
+  const container = document.createElement('div');
+  container.innerHTML = html || '';
+  (function clean(parent){
+    Array.from(parent.childNodes).forEach(child => {
+      if(child.nodeType === 1){
+        let el = child;
+        if(el.tagName === 'FONT'){
+          const span = document.createElement('span');
+          const color = el.getAttribute('color');
+          if(color) span.style.color = color;
+          while(el.firstChild) span.appendChild(el.firstChild);
+          el.parentNode.replaceChild(span, el);
+          el = span;
+        }
+        if(!RTE_ALLOWED_TAGS.has(el.tagName)){
+          while(el.firstChild) parent.insertBefore(el.firstChild, el);
+          parent.removeChild(el);
+          return;
+        }
+        if(el.tagName === 'SPAN'){
+          const isRef = el.classList.contains('task-ref');
+          const refTarget = el.getAttribute('data-ref-target');
+          const color = el.style.color;
+          const bg = el.style.backgroundColor;
+          const fontWeight = el.style.fontWeight;
+          const fontStyle = el.style.fontStyle;
+          const textDecoration = el.style.textDecoration || el.style.textDecorationLine;
+          Array.from(el.attributes).forEach(a => el.removeAttribute(a.name));
+          const styleParts = [];
+          if(color) styleParts.push('color:' + color);
+          if(bg) styleParts.push('background-color:' + bg);
+          if(fontWeight && (fontWeight === 'bold' || parseInt(fontWeight, 10) >= 600)) styleParts.push('font-weight:bold');
+          if(fontStyle === 'italic') styleParts.push('font-style:italic');
+          if(textDecoration && textDecoration.includes('underline')) styleParts.push('text-decoration:underline');
+          if(styleParts.length) el.setAttribute('style', styleParts.join(';'));
+          if(isRef && refTarget){
+            el.className = 'task-ref';
+            el.setAttribute('data-ref-target', refTarget);
+          }
+        } else if(el.tagName === 'A'){
+          const href = el.getAttribute('href');
+          Array.from(el.attributes).forEach(a => el.removeAttribute(a.name));
+          if(href) el.setAttribute('href', href);
+          el.setAttribute('target', '_blank');
+          el.setAttribute('rel', 'noopener noreferrer');
+          el.className = 'task-link';
+        } else {
+          Array.from(el.attributes).forEach(a => el.removeAttribute(a.name));
+        }
+        clean(el);
+      } else if(child.nodeType !== 3){
+        parent.removeChild(child);
+      }
+    });
+  })(container);
+  return container.innerHTML;
+}
+
+/* ---- 編號格式轉換 ---- */
+function numberToLetters(num, upper){
+  let s = '';
+  let n = num;
+  while(n > 0){
+    const rem = (n - 1) % 26;
+    s = String.fromCharCode(65 + rem) + s;
+    n = Math.floor((n - 1) / 26);
+  }
+  return upper ? s : s.toLowerCase();
+}
+function numberToCircled(num){
+  if(num >= 1 && num <= 20) return String.fromCodePoint(0x2460 + (num - 1));
+  return '(' + num + ')';
+}
+function numberToChinese(num){
+  const d = ['','一','二','三','四','五','六','七','八','九'];
+  if(num <= 0) return String(num);
+  if(num < 10) return d[num];
+  if(num < 20) return '十' + (num % 10 === 0 ? '' : d[num % 10]);
+  if(num < 100){
+    const tens = Math.floor(num / 10);
+    const ones = num % 10;
+    return d[tens] + '十' + (ones === 0 ? '' : d[ones]);
+  }
+  return String(num);
+}
+function getNumberingPrefix(type, index){
+  switch(type){
+    case 'number': return index + '.';
+    case 'upper': return numberToLetters(index, true) + '.';
+    case 'lower': return numberToLetters(index, false) + '.';
+    case 'circle': return numberToCircled(index) + '.';
+    case 'chinese': return numberToChinese(index) + '.';
+    default: return '';
+  }
+}
+function computeDisplayText(node, numberLabel){
+  const content = node.content || '';
+  if(node.datePos === 'front' && node.dateStr){
+    return numberLabel ? `${node.dateStr}（${numberLabel}${content}` : `${node.dateStr}-${content}`;
+  }
+  if(node.datePos === 'back' && node.dateStr){
+    return numberLabel ? `${numberLabel}${content}。（${node.dateStr}` : `${content}。${node.dateStr}`;
+  }
+  return `${numberLabel}${content}`;
+}
+
+/* ---- 資料模型 ---- */
+function blankNode(content){
+  return { id: uid(), content: content, numberingType: 'none', datePos: 'none', dateStr: '', checked:false, collapsed:false, children: [] };
+}
+function migrateNode(n){
+  if(n.content === undefined){
+    n.content = n.text !== undefined ? n.text : '';
+  }
+  n.numberingType = n.numberingType || 'none';
+  n.datePos = n.datePos || 'none';
+  n.dateStr = n.dateStr || '';
+  n.checked = !!n.checked;
+  n.collapsed = !!n.collapsed;
+  n.children = (n.children || []).map(migrateNode);
+  return n;
+}
+function sampleTasks(){
+  const raw = [
+    { text: '2026-07-01 - 7月事項', checked:false, children: [
+      { text: '2026-07-01 - 柏良0690鑰匙丟在枋寮長興鑰匙櫃上忘了拿，已請長興幫忙收好，下次司機過去再幫忙拿回來。', checked:true, children: [
+        { text: '2026-07-01 - 拿備用0690 key給柏良', checked:true, children: [] },
+        { text: '2026-07-01 - 請調度幫忙備註，下次去枋寮長興的司機，幫忙帶回0690 key', checked:true, children: [] }
+      ]},
+      { text: '2026-07-02 - 找時間買洗車刷', checked:false, children: [] },
+      { text: '2026-07-07 - 胎紋檢查記錄系統', checked:false, children: [
+        { text: '2026-07-07 - 8輪尾車', checked:true, children: [] },
+        { text: '2026-07-07 - 10輪尾車', checked:false, children: [] },
+        { text: '2026-07-07 - 6輪車頭', checked:false, children: [] },
+        { text: '2026-07-07 - 8輪車頭', checked:false, children: [] }
+      ]}
+    ]}
+  ];
+  function addIds(n){ n.id = uid(); n.children.forEach(addIds); return n; }
+  return raw.map(n => migrateNode(addIds(n)));
+}
+
+function findNode(list, id){
+  for(const n of list){
+    if(n.id === id) return n;
+    const found = findNode(n.children, id);
+    if(found) return found;
+  }
+  return null;
+}
+function extractNode(list, id){
+  for(let i=0;i<list.length;i++){
+    if(list[i].id === id) return list.splice(i,1)[0];
+    const found = extractNode(list[i].children, id);
+    if(found) return found;
+  }
+  return null;
+}
+function containsId(node, id){
+  if(node.id === id) return true;
+  return node.children.some(c => containsId(c, id));
+}
+function locate(list, id){
+  for(let i=0;i<list.length;i++){
+    if(list[i].id === id) return { list, index: i };
+    const found = locate(list[i].children, id);
+    if(found) return found;
+  }
+  return null;
+}
+function moveNode(draggedId, targetId, position){
+  if(draggedId === targetId) return false;
+  const draggedNode = findNode(state.tasks, draggedId);
+  if(!draggedNode) return false;
+  if(containsId(draggedNode, targetId)) return false;
+  const extracted = extractNode(state.tasks, draggedId);
+  if(!extracted) return false;
+  if(position === 'inside'){
+    const targetNode = findNode(state.tasks, targetId);
+    if(targetNode){ targetNode.children.push(extracted); targetNode.collapsed = false; }
+    else state.tasks.push(extracted);
+  } else {
+    const loc = locate(state.tasks, targetId);
+    if(loc){
+      const insertIndex = position === 'before' ? loc.index : loc.index + 1;
+      loc.list.splice(insertIndex, 0, extracted);
+    } else {
+      state.tasks.push(extracted);
+    }
+  }
+  return true;
+}
+function positionGhost(ghost, x, y){
+  ghost.style.left = (x + 14) + 'px';
+  ghost.style.top = (y - 16) + 'px';
+}
+function clearRowDrop(row){
+  if(!row) return;
+  row.classList.remove('drop-before','drop-after','drop-inside');
+  delete row.dataset.dropPos;
+}
+function attachRowInteractions(row, li, node){
+  // 桌面：整列可拖曳（原生 HTML5 拖放，滑鼠按住移動才會觸發，單純點擊不受影響）
+  row.draggable = true;
+  row.addEventListener('dragstart', (e) => {
+    if(e.target.closest('input,button,a,.task-ref')){ e.preventDefault(); return; }
+    dragId = node.id;
+    e.dataTransfer.setData('text/plain', node.id);
+    e.dataTransfer.effectAllowed = 'move';
+  });
+
+  // 桌面：單擊（非拖曳）＝ 展開／收合子任務；沒有子任務則沒有作用
+  row.addEventListener('click', (e) => {
+    if(e.target.closest('input,button,a,.task-ref')) return;
+    if(!node.children.length) return;
+    node.collapsed = !node.collapsed;
+    scheduleSave();
+    render();
+  });
+
+  // 手機觸控：長按＋移動＝拖曳；輕點放開＝展開／收合
+  let pressTimer = null, startX = 0, startY = 0, longPressFired = false, touchCancelled = false;
+  let ghost = null, lastRow = null;
+
+  row.addEventListener('touchstart', (e) => {
+    if(e.target.closest('input,button,a,.task-ref')) return;
+    const touch = e.touches[0];
+    startX = touch.clientX; startY = touch.clientY;
+    longPressFired = false; touchCancelled = false;
+    pressTimer = setTimeout(() => {
+      if(touchCancelled) return;
+      longPressFired = true;
+      const label = stripHtml(node.content) || '(空白任務)';
+      ghost = document.createElement('div');
+      ghost.className = 'drag-ghost';
+      ghost.textContent = label.slice(0, 40);
+      document.body.appendChild(ghost);
+      positionGhost(ghost, touch.clientX, touch.clientY);
+      li.classList.add('dragging-source');
+      if(navigator.vibrate) navigator.vibrate(10);
+    }, LONG_PRESS_MS);
+  }, { passive: true });
+
+  row.addEventListener('touchmove', (e) => {
+    const touch = e.touches[0];
+    if(!longPressFired){
+      if(Math.abs(touch.clientX - startX) > 10 || Math.abs(touch.clientY - startY) > 10){
+        touchCancelled = true;
+        clearTimeout(pressTimer);
+      }
+      return;
+    }
+    e.preventDefault();
+    positionGhost(ghost, touch.clientX, touch.clientY);
+    ghost.style.display = 'none';
+    const elUnder = document.elementFromPoint(touch.clientX, touch.clientY);
+    ghost.style.display = '';
+    const rowUnder = elUnder ? elUnder.closest('.row') : null;
+    if(lastRow && lastRow !== rowUnder) clearRowDrop(lastRow);
+    if(rowUnder){
+      const rect = rowUnder.getBoundingClientRect();
+      const ratio = (touch.clientY - rect.top) / rect.height;
+      const pos = ratio < 0.3 ? 'before' : (ratio > 0.7 ? 'after' : 'inside');
+      rowUnder.classList.remove('drop-before','drop-after','drop-inside');
+      rowUnder.classList.add('drop-' + pos);
+      rowUnder.dataset.dropPos = pos;
+      lastRow = rowUnder;
+    } else {
+      lastRow = null;
+    }
+  }, { passive: false });
+
+  const finishTouch = (e) => {
+    clearTimeout(pressTimer);
+    if(!longPressFired){
+      if(!touchCancelled && !(e.target && e.target.closest && e.target.closest('input,button,a,.task-ref'))){
+        if(node.children.length){
+          node.collapsed = !node.collapsed;
+          scheduleSave();
+          render();
+        }
+      }
+      return;
+    }
+    if(ghost && ghost.parentNode) document.body.removeChild(ghost);
+    li.classList.remove('dragging-source');
+    let moved = false;
+    if(lastRow){
+      const targetLi = lastRow.closest('li');
+      const pos = lastRow.dataset.dropPos || 'inside';
+      clearRowDrop(lastRow);
+      if(targetLi && targetLi.dataset.id && targetLi.dataset.id !== node.id){
+        moved = moveNode(node.id, targetLi.dataset.id, pos);
+      }
+    } else if(e.changedTouches && e.changedTouches[0]){
+      const touch = e.changedTouches[0];
+      const elUnder = document.elementFromPoint(touch.clientX, touch.clientY);
+      if(elUnder && elUnder.closest('#panel') && !elUnder.closest('.row')){
+        const extracted = extractNode(state.tasks, node.id);
+        if(extracted){ state.tasks.push(extracted); moved = true; }
+      }
+    }
+    ghost = null; lastRow = null; longPressFired = false;
+    if(moved){ scheduleSave(); render(); }
+  };
+  row.addEventListener('touchend', finishTouch);
+  row.addEventListener('touchcancel', () => {
+    clearTimeout(pressTimer);
+    if(longPressFired){
+      if(ghost && ghost.parentNode) document.body.removeChild(ghost);
+      clearRowDrop(lastRow);
+      li.classList.remove('dragging-source');
+      ghost = null; lastRow = null; longPressFired = false;
+    }
+  });
+}
+
+function clearCompleted(list){
+  for(let i=list.length-1;i>=0;i--){
+    if(list[i].checked){ list.splice(i,1); }
+    else{ clearCompleted(list[i].children); }
+  }
+}
+
+function setAllCollapsed(list, value){
+  list.forEach(n => {
+    n.collapsed = value;
+    setAllCollapsed(n.children, value);
+  });
+}
+
+/* ---- 任務關聯：跳到目標並閃一下黃底 ---- */
+function findPathToNode(list, id, path){
+  for(const n of list){
+    const nextPath = path.concat([n]);
+    if(n.id === id) return nextPath;
+    const found = findPathToNode(n.children, id, nextPath);
+    if(found) return found;
+  }
+  return null;
+}
+function flashRow(row){
+  if(!row) return;
+  row.classList.remove('ref-flash');
+  void row.offsetWidth; // 強制 reflow，讓動畫可以重新觸發
+  row.classList.add('ref-flash');
+}
+function scrollToTask(targetId){
+  if(!targetId) return;
+  const path = findPathToNode(state.tasks, targetId, []);
+  if(!path){
+    alert('找不到關聯的任務，可能已被刪除。');
+    return;
+  }
+  let needsRender = false;
+  path.slice(0, -1).forEach(ancestor => {
+    if(ancestor.collapsed){ ancestor.collapsed = false; needsRender = true; }
+  });
+  if(needsRender){ scheduleSave(); render(); }
+  requestAnimationFrame(() => {
+    const li = document.querySelector(`li[data-id="${targetId}"]`);
+    if(!li) return;
+    li.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    flashRow(li.querySelector('.row'));
+  });
+}
+
+function render(){
+  if(titleEl.getAttribute('contenteditable') !== 'true'){
+    titleEl.textContent = state.title;
+  }
+  const root = document.getElementById('treeRoot');
+  const emptyMsg = document.getElementById('emptyMsg');
+  root.innerHTML = '';
+  if(state.tasks.length === 0){
+    emptyMsg.style.display = 'block';
+  } else {
+    emptyMsg.style.display = 'none';
+    root.appendChild(renderList(state.tasks, 0));
+  }
+}
+
+function renderList(list, depth){
+  const frag = document.createDocumentFragment();
+  const counters = {};
+  list.forEach(node => {
+    let numberLabel = '';
+    if(node.numberingType && node.numberingType !== 'none'){
+      counters[node.numberingType] = (counters[node.numberingType] || 0) + 1;
+      numberLabel = getNumberingPrefix(node.numberingType, counters[node.numberingType]);
+    }
+    frag.appendChild(renderNode(node, depth, numberLabel));
+  });
+  return frag;
+}
+
+function renderNode(node, depth, numberLabel){
+  const li = document.createElement('li');
+  li.dataset.depth = depth;
+  li.dataset.id = node.id;
+
+  const row = document.createElement('div');
+  row.className = 'row';
+
+  const hasChildren = node.children.length > 0;
+
+  const cb = document.createElement('input');
+  cb.type = 'checkbox';
+  cb.checked = node.checked;
+  cb.addEventListener('change', () => {
+    node.checked = cb.checked;
+    scheduleSave();
+    render();
+  });
+
+  const text = document.createElement('div');
+  text.className = 'text' + (node.checked ? ' checked' : '');
+  let textHtml = linkifyHtml(computeDisplayText(node, numberLabel));
+  if(hasChildren){
+    const glyph = node.collapsed ? '▶' : '▼';
+    const title = node.collapsed ? '展開子任務' : '隱藏子任務';
+    textHtml += ` <span class="tri-end" title="${title}">${glyph}</span>`;
+  }
+  text.innerHTML = textHtml;
+  text.querySelectorAll('.task-ref').forEach(span => {
+    span.addEventListener('click', (e) => {
+      e.stopPropagation();
+      scrollToTask(span.dataset.refTarget);
+    });
+  });
+
+  const btnrow = document.createElement('div');
+  btnrow.className = 'btnrow';
+
+  const editBtn = document.createElement('button');
+  editBtn.className = 'iconbtn edit';
+  editBtn.textContent = '✎';
+  editBtn.title = '編輯這筆任務';
+  editBtn.addEventListener('click', () => openTaskForm({ mode: 'edit', node }));
+
+  const addBtn = document.createElement('button');
+  addBtn.className = 'iconbtn add';
+  addBtn.textContent = '+';
+  addBtn.title = '新增子任務';
+  addBtn.addEventListener('click', () => openTaskForm({ mode: 'addChild', parentId: node.id }));
+
+  const delBtn = document.createElement('button');
+  delBtn.className = 'iconbtn del';
+  delBtn.textContent = '\u2212';
+  delBtn.title = '刪除此任務（含子任務）';
+  delBtn.addEventListener('click', () => {
+    extractNode(state.tasks, node.id);
+    scheduleSave();
+    render();
+  });
+
+  btnrow.appendChild(editBtn);
+  btnrow.appendChild(addBtn);
+  btnrow.appendChild(delBtn);
+  row.appendChild(cb);
+  row.appendChild(text);
+  row.appendChild(btnrow);
+  li.appendChild(row);
+
+  attachRowInteractions(row, li, node);
+
+  row.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'move';
+    const rect = row.getBoundingClientRect();
+    const ratio = (e.clientY - rect.top) / rect.height;
+    const pos = ratio < 0.3 ? 'before' : (ratio > 0.7 ? 'after' : 'inside');
+    row.dataset.dropPos = pos;
+    row.classList.remove('drop-before','drop-after','drop-inside');
+    row.classList.add('drop-' + pos);
+  });
+  row.addEventListener('dragleave', () => {
+    row.classList.remove('drop-before','drop-after','drop-inside');
+    delete row.dataset.dropPos;
+  });
+  row.addEventListener('drop', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const pos = row.dataset.dropPos || 'inside';
+    row.classList.remove('drop-before','drop-after','drop-inside');
+    delete row.dataset.dropPos;
+    const draggedId = e.dataTransfer.getData('text/plain') || dragId;
+    if(!draggedId) return;
+    if(moveNode(draggedId, node.id, pos)){
+      scheduleSave();
+      render();
+    }
+  });
+
+  if(hasChildren && !node.collapsed){
+    const ul = document.createElement('ul');
+    ul.className = 'tree';
+    ul.appendChild(renderList(node.children, depth + 1));
+    li.appendChild(ul);
+  }
+
+  return li;
+}
+
+function scheduleSave(){
+  if(applyingRemote) return; // 資料剛從雲端同步下來，不用馬上又存回去
+  const status = document.getElementById('statusLine');
+  status.textContent = '儲存中…';
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => { cloudSave(); }, 500);
+}
+
+async function loadPersisted(){
+  const status = document.getElementById('statusLine');
+  status.textContent = '載入中…';
+  try{
+    const result = await window.storage.get(STORAGE_KEY);
+    if(result){
+      const parsed = JSON.parse(result.value);
+      state.title = parsed.title || state.title;
+      state.tasks = (parsed.tasks || []).map(migrateNode);
+    } else {
+      state.tasks = [];
+    }
+  }catch(err){
+    state.tasks = [];
+  }
+  setAllCollapsed(state.tasks, false);
+  document.getElementById('collapseAllToggle').checked = false;
+  status.textContent = '';
+  render();
+}
+
+/* ---- 新增／編輯彈窗 ---- */
+function openTaskForm(opts){
+  formMode = opts.mode;
+  formParentId = opts.parentId || null;
+  formNode = opts.node || null;
+
+  const titles = { addRoot: '新增主任務', addChild: '新增子任務', edit: '編輯任務' };
+  document.getElementById('modalTitle').textContent = titles[formMode];
+  document.getElementById('modalConfirm').textContent = formMode === 'edit' ? '儲存' : '新增';
+
+  if(formMode === 'edit' && formNode){
+    document.getElementById('dateInput').value = formNode.dateStr ? formNode.dateStr.replace(/\//g,'-') : todayStr();
+    document.getElementById('dateFront').checked = formNode.datePos === 'front';
+    document.getElementById('dateBack').checked = formNode.datePos === 'back';
+    document.getElementById('numberingSelect').value = formNode.numberingType || 'none';
+    document.getElementById('textInput').innerHTML = formNode.content || '';
+  } else {
+    document.getElementById('dateInput').value = todayStr();
+    document.getElementById('dateFront').checked = false;
+    document.getElementById('dateBack').checked = false;
+    document.getElementById('numberingSelect').value = 'none';
+    document.getElementById('textInput').innerHTML = '';
+  }
+  document.getElementById('overlay').classList.remove('hidden');
+  setTimeout(() => document.getElementById('textInput').focus(), 30);
+}
+function closeTaskForm(){
+  document.getElementById('overlay').classList.add('hidden');
+  formMode = 'addRoot';
+  formParentId = null;
+  formNode = null;
+}
+function confirmTaskForm(){
+  const dateFront = document.getElementById('dateFront').checked;
+  const dateBack = document.getElementById('dateBack').checked;
+  const dateRaw = document.getElementById('dateInput').value;
+  const numberingType = document.getElementById('numberingSelect').value;
+  const textVal = sanitizeContentHtml(document.getElementById('textInput').innerHTML).trim();
+  const isEmpty = stripHtml(textVal).trim() === '';
+
+  if(isEmpty && !dateFront && !dateBack && numberingType === 'none'){ closeTaskForm(); return; }
+
+  const dateStr = dateRaw ? dateRaw.replace(/-/g, '/') : '';
+  const datePos = dateFront ? 'front' : (dateBack ? 'back' : 'none');
+
+  if(formMode === 'edit' && formNode){
+    formNode.content = textVal;
+    formNode.numberingType = numberingType;
+    formNode.datePos = datePos;
+    formNode.dateStr = dateStr;
+  } else {
+    const node = blankNode(textVal);
+    node.numberingType = numberingType;
+    node.datePos = datePos;
+    node.dateStr = dateStr;
+    if(formMode === 'addChild' && formParentId){
+      const parent = findNode(state.tasks, formParentId);
+      if(parent){ parent.children.push(node); parent.collapsed = false; }
+    } else {
+      state.tasks.push(node);
+    }
+  }
+  scheduleSave();
+  render();
+  closeTaskForm();
+}
+
+document.getElementById('addRootBtn').addEventListener('click', () => openTaskForm({ mode: 'addRoot' }));
+document.getElementById('modalCancel').addEventListener('click', closeTaskForm);
+document.getElementById('modalConfirm').addEventListener('click', confirmTaskForm);
+document.getElementById('overlay').addEventListener('click', (e) => {
+  if(e.target.id === 'overlay') closeTaskForm();
+});
+document.getElementById('dateFront').addEventListener('change', (e) => {
+  if(e.target.checked) document.getElementById('dateBack').checked = false;
+});
+document.getElementById('dateBack').addEventListener('change', (e) => {
+  if(e.target.checked) document.getElementById('dateFront').checked = false;
+});
+document.getElementById('textInput').addEventListener('keydown', (e) => {
+  if(e.key !== 'Enter') return;
+  e.preventDefault();
+  if(e.shiftKey){ document.execCommand('insertLineBreak'); }
+  else{ confirmTaskForm(); }
+});
+document.getElementById('textInput').addEventListener('paste', (e) => {
+  e.preventDefault();
+  const text = (e.clipboardData || window.clipboardData).getData('text/plain');
+  document.execCommand('insertText', false, text);
+});
+
+/* ---- 富文字工具列（粗體／斜體／底線／文字顏色／背景色／清除格式）---- */
+let savedRTERange = null;
+function saveRTESelection(){
+  const sel = window.getSelection();
+  const editor = document.getElementById('textInput');
+  if(sel && sel.rangeCount > 0 && editor.contains(sel.anchorNode)){
+    savedRTERange = sel.getRangeAt(0).cloneRange();
+  }
+}
+function restoreRTESelection(){
+  if(!savedRTERange) return;
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(savedRTERange);
+}
+document.getElementById('textInput').addEventListener('mouseup', saveRTESelection);
+document.getElementById('textInput').addEventListener('keyup', saveRTESelection);
+
+function applyRTECommand(cmd, value){
+  const editor = document.getElementById('textInput');
+  editor.focus();
+  restoreRTESelection();
+  try{ document.execCommand('styleWithCSS', false, true); }catch(err){}
+  document.execCommand(cmd, false, value);
+  saveRTESelection();
+}
+// 一般按鈕：用 mousedown 阻止預設行為，讓編輯區的選取文字不會被搶走焦點
+['rteBold','rteItalic','rteUnderline','rteClear','rteLink'].forEach(id => {
+  document.getElementById(id).addEventListener('mousedown', (e) => e.preventDefault());
+});
+document.getElementById('rteBold').addEventListener('click', () => applyRTECommand('bold'));
+document.getElementById('rteItalic').addEventListener('click', () => applyRTECommand('italic'));
+document.getElementById('rteUnderline').addEventListener('click', () => applyRTECommand('underline'));
+document.getElementById('rteClear').addEventListener('click', () => applyRTECommand('removeFormat'));
+// 顏色／背景色：<input type=color> 開啟原生選色器會搶走焦點，所以先記住選取範圍，選色後再套用
+document.getElementById('rteColorBtn').addEventListener('mousedown', saveRTESelection);
+document.getElementById('rteHighlightBtn').addEventListener('mousedown', saveRTESelection);
+document.getElementById('rteColorInput').addEventListener('input', (e) => applyRTECommand('foreColor', e.target.value));
+document.getElementById('rteHighlightInput').addEventListener('input', (e) => {
+  try{ applyRTECommand('hiliteColor', e.target.value); }
+  catch(err){ applyRTECommand('backColor', e.target.value); }
+});
+
+/* ---- 任務關聯：選取文字 → 挑選要連結的任務 ---- */
+let pendingLinkRange = null;
+let flatTaskList = [];
+function flattenTasks(list, depth, out){
+  list.forEach(n => {
+    out.push({ id: n.id, label: '　'.repeat(depth) + (stripHtml(n.content).trim() || '(空白任務)') });
+    flattenTasks(n.children, depth + 1, out);
+  });
+  return out;
+}
+document.getElementById('rteLink').addEventListener('click', () => {
+  const sel = window.getSelection();
+  const editor = document.getElementById('textInput');
+  if(!sel || sel.rangeCount === 0 || sel.isCollapsed || !editor.contains(sel.anchorNode)){
+    alert('請先在內容欄位中選取要建立關聯的文字。');
+    return;
+  }
+  pendingLinkRange = sel.getRangeAt(0).cloneRange();
+  flatTaskList = flattenTasks(state.tasks, 0, []);
+  document.getElementById('linkSearchInput').value = '';
+  renderLinkResults('');
+  document.getElementById('linkOverlay').classList.remove('hidden');
+  setTimeout(() => document.getElementById('linkSearchInput').focus(), 30);
+});
+function renderLinkResults(query){
+  const box = document.getElementById('linkResultsList');
+  box.innerHTML = '';
+  const q = query.trim().toLowerCase();
+  const filtered = flatTaskList.filter(t => !q || t.label.toLowerCase().includes(q));
+  if(filtered.length === 0){
+    const empty = document.createElement('div');
+    empty.className = 'link-result-item';
+    empty.style.color = 'var(--slate)';
+    empty.style.cursor = 'default';
+    empty.textContent = '沒有符合的任務';
+    box.appendChild(empty);
+    return;
+  }
+  filtered.slice(0, 50).forEach(t => {
+    const item = document.createElement('div');
+    item.className = 'link-result-item';
+    item.textContent = t.label;
+    item.addEventListener('click', () => applyTaskLink(t.id));
+    box.appendChild(item);
+  });
+}
+document.getElementById('linkSearchInput').addEventListener('input', (e) => renderLinkResults(e.target.value));
+document.getElementById('linkCancelBtn').addEventListener('click', closeLinkPicker);
+document.getElementById('linkOverlay').addEventListener('click', (e) => {
+  if(e.target.id === 'linkOverlay') closeLinkPicker();
+});
+function closeLinkPicker(){
+  document.getElementById('linkOverlay').classList.add('hidden');
+  pendingLinkRange = null;
+}
+function applyTaskLink(targetId){
+  const editor = document.getElementById('textInput');
+  editor.focus();
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  if(pendingLinkRange) sel.addRange(pendingLinkRange);
+  if(sel.rangeCount === 0 || sel.isCollapsed){
+    closeLinkPicker();
+    alert('選取的文字已遺失，請重新選取後再試一次。');
+    return;
+  }
+  const selectedText = sel.toString();
+  document.execCommand('insertHTML', false,
+    `<span class="task-ref" data-ref-target="${targetId}">${escapeHtml(selectedText)}</span>`);
+  closeLinkPicker();
+}
+
+/* ---- 標題編輯（雙擊進入編輯）---- */
+const titleEl = document.getElementById('titleEl');
+titleEl.addEventListener('dblclick', () => {
+  titleEl.setAttribute('contenteditable', 'true');
+  titleEl.focus();
+  const range = document.createRange();
+  range.selectNodeContents(titleEl);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+});
+titleEl.addEventListener('blur', () => {
+  titleEl.setAttribute('contenteditable', 'false');
+  const newTitle = titleEl.textContent.trim() || '任務樹狀清單';
+  state.title = newTitle;
+  titleEl.textContent = newTitle;
+  scheduleSave();
+});
+titleEl.addEventListener('keydown', (e) => {
+  if(e.key === 'Enter'){ e.preventDefault(); titleEl.blur(); }
+});
+
+/* ---- 儲存為 JSON ---- */
+document.getElementById('saveBtn').addEventListener('click', async () => {
+  const status = document.getElementById('statusLine');
+  const date = todayStr();
+  const filename = `${date}-list.json`;
+  const payload = JSON.stringify(state, null, 2);
+  const blob = new Blob([payload], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  status.textContent = `已匯出 ${filename}`;
+  setTimeout(() => { if(status.textContent === `已匯出 ${filename}`) status.textContent = ''; }, 2500);
+});
+
+/* ---- 讀取 JSON ---- */
+document.getElementById('loadBtn').addEventListener('click', () => {
+  document.getElementById('fileInput').click();
+});
+document.getElementById('fileInput').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if(!file) return;
+  const status = document.getElementById('statusLine');
+  try{
+    const text = await file.text();
+    const parsed = JSON.parse(text);
+    state.title = parsed.title || state.title;
+    state.tasks = (parsed.tasks || []).map(migrateNode);
+    render();
+    scheduleSave();
+    status.textContent = '已讀取檔案';
+    setTimeout(() => { if(status.textContent === '已讀取檔案') status.textContent = ''; }, 2000);
+  }catch(err){
+    alert('讀取失敗，檔案格式不正確。');
+  }
+});
+
+/* ---- 列印 ---- */
+document.getElementById('printBtn').addEventListener('click', () => window.print());
+
+/* ---- 清除全部 ---- */
+document.getElementById('clearAllBtn').addEventListener('click', () => {
+  if(confirm('確定要清除所有任務嗎？此動作無法復原，建議先「儲存」備份。')){
+    if(confirm('再次確認：這會清空目前所有主任務與子任務，是否繼續？')){
+      state.tasks = [];
+      scheduleSave();
+      render();
+    }
+  }
+});
+
+/* ---- 清除已完成 ---- */
+document.getElementById('clearDoneBtn').addEventListener('click', () => {
+  clearCompleted(state.tasks);
+  scheduleSave();
+  render();
+});
+
+/* ---- 全隱藏／全展開 ---- */
+document.getElementById('collapseAllToggle').addEventListener('change', (e) => {
+  setAllCollapsed(state.tasks, e.target.checked);
+  scheduleSave();
+  render();
+});
+
+/* ---- 根層拖曳放置區（讓子任務可變主任務）---- */
+const panel = document.getElementById('panel');
+panel.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  panel.classList.add('drag-target');
+});
+panel.addEventListener('dragleave', (e) => {
+  if(e.target === panel) panel.classList.remove('drag-target');
+});
+panel.addEventListener('drop', (e) => {
+  e.preventDefault();
+  panel.classList.remove('drag-target');
+  const draggedId = e.dataTransfer.getData('text/plain') || dragId;
+  if(!draggedId) return;
+  const moved = extractNode(state.tasks, draggedId);
+  if(moved){
+    state.tasks.push(moved);
+    scheduleSave();
+    render();
+  }
+});
+
+/* ---- Firebase 雲端同步 ---- */
+// ▼▼▼ 請換成你自己 Firebase 專案「網頁應用程式」的設定值 ▼▼▼
+// 位置：Firebase 主控台 → 齒輪圖示「專案設定」→ 一般 → 往下捲到「你的應用程式」
+// → 選你的 Web App（沒有就先新增一個）→ 複製 firebaseConfig 物件貼在這裡
+const firebaseConfig = {
+  apiKey: "AIzaSyDuwAcj68H7ntSDZxLCuYiR4anHDDZ-rYA",
+  authDomain: "list-tree.firebaseapp.com",
+  projectId: "list-tree",
+  storageBucket: "list-tree.firebasestorage.app",
+  messagingSenderId: "747810820130",
+  appId: "1:747810820130:web:b16d7d6ada64864c55ba7b"
+};
+// ▲▲▲ ---------------------------------------------------------- ▲▲▲
+
+const fbApp = initializeApp(firebaseConfig);
+const fbAuth = getAuth(fbApp);
+const db = getFirestore(fbApp);
+try{ enableIndexedDbPersistence(db); }catch(e){ /* 同時開多個分頁時可能會失敗，可忽略 */ }
+
+function getSyncCode(){
+  let code = localStorage.getItem('taskTreeSyncCode');
+  if(!code){
+    code = (window.prompt('請設定「雲端同步代碼」：\n自己取一組代碼即可（例如公司名或英數字），電腦、手機都輸入同一組，才會同步到同一份清單。', '') || '').trim();
+    if(!code) code = 'default';
+    localStorage.setItem('taskTreeSyncCode', code);
+  }
+  return code;
+}
+
+let applyingRemote = false;
+let cloudDocRef = null;
+
+async function cloudSave(){
+  if(!cloudDocRef) return;
+  const status = document.getElementById('statusLine');
+  try{
+    await setDoc(cloudDocRef, { title: state.title, tasks: state.tasks, updatedAt: Date.now() });
+    status.textContent = '已同步雲端';
+    setTimeout(() => { if(status.textContent === '已同步雲端') status.textContent = ''; }, 1500);
+  }catch(err){
+    console.error('雲端儲存失敗：', err);
+    status.textContent = '雲端儲存失敗（請檢查網路或 Firebase 設定）';
+  }
+}
+
+function bindCloudSync(){
+  const syncCode = getSyncCode();
+  cloudDocRef = doc(db, 'taskTrees', syncCode);
+  let firstSnapshot = true;
+  onSnapshot(cloudDocRef, (snap) => {
+    const status = document.getElementById('statusLine');
+    if(snap.exists()){
+      const data = snap.data();
+      applyingRemote = true;
+      state.title = data.title || state.title;
+      state.tasks = (data.tasks || []).map(migrateNode);
+      if(firstSnapshot){
+        // 每次開啟／切換清單時，預設全部展開
+        setAllCollapsed(state.tasks, false);
+        document.getElementById('collapseAllToggle').checked = false;
+        firstSnapshot = false;
+      }
+      render();
+      applyingRemote = false;
+      if(!snap.metadata.hasPendingWrites){
+        status.textContent = '已同步雲端';
+        setTimeout(() => { if(status.textContent === '已同步雲端') status.textContent = ''; }, 1500);
+      }
+    } else {
+      // 這組同步代碼在雲端還沒有資料，建立一份空白清單（不再自動帶入範例資料）
+      state.tasks = [];
+      firstSnapshot = false;
+      render();
+      cloudSave();
+    }
+  }, (err) => {
+    console.error('雲端同步監聽失敗：', err);
+    document.getElementById('statusLine').textContent = '雲端連線失敗，請確認網路與 Firebase 設定';
+  });
+}
+
+onAuthStateChanged(fbAuth, (user) => {
+  if(user) bindCloudSync();
+});
+signInAnonymously(fbAuth).catch((err) => {
+  console.error('Firebase 匿名登入失敗：', err);
+  document.getElementById('statusLine').textContent = '雲端登入失敗，暫時改用本機儲存';
+  loadPersisted();
+});
+
+document.getElementById('syncCodeBtn').addEventListener('click', () => {
+  const current = localStorage.getItem('taskTreeSyncCode') || '';
+  const next = (window.prompt('雲端同步代碼（電腦、手機請輸入同一組才會共用同一份清單）：', current) || '').trim();
+  if(!next || next === current) return;
+  localStorage.setItem('taskTreeSyncCode', next);
+  document.getElementById('statusLine').textContent = '切換同步代碼中…';
+  bindCloudSync();
+});
+</script>
+</body>
+</html>
