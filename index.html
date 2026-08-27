@@ -170,6 +170,20 @@
     vertical-align: 1px;
   }
 
+  /* 編輯筆／雲朵／迴紋針：緊接在文字（或三角形）後面，同一行內顯示 */
+  .text .iconbtn.inline-icon{
+    display: inline-flex;
+    width: 22px; height: 22px;
+    font-size: 12.5px;
+    vertical-align: middle;
+    margin-left: 8px;
+  }
+  .text .imgrow{
+    display: inline-flex;
+    vertical-align: middle;
+    margin: 0 0 0 3px;
+  }
+
   input[type=checkbox]{
     width: 20px; height: 20px;
     margin-top: 4px;
@@ -425,6 +439,49 @@
   .link-result-item:last-child{ border-bottom:none; }
   .link-result-item:hover{ background: #F7F6F2; }
 
+  /* ---- 照片上傳（雲朵／迴紋針）---- */
+  .imgrow{
+    display:flex;
+    align-items:center;
+    gap: 3px;
+    flex: 0 0 auto;
+    margin: 0 4px;
+  }
+  .cloud-btn, .clip-btn{
+    border:none;
+    background:transparent;
+    cursor:pointer;
+    font-size: 15px;
+    line-height:1;
+    padding: 2px 3px;
+    border-radius: 4px;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+    touch-action: manipulation;
+  }
+  .clip-btn.deleting{ opacity: 0.4; }
+  .cloud-btn:hover, .clip-btn:hover{ background: #E7E4DA; }
+  .cloud-btn:disabled{ cursor: default; opacity: 0.6; }
+  .clip-btn{ font-size: 14px; }
+
+  #imgViewerOverlay{
+    position: fixed; inset: 0;
+    background: rgba(20,22,23,0.82);
+    display:flex; align-items:center; justify-content:center;
+    z-index: 80;
+    padding: 24px;
+    cursor: zoom-out;
+  }
+  #imgViewerOverlay.hidden{ display:none; }
+  #imgViewerOverlay img{
+    max-width: 100%;
+    max-height: 100%;
+    border-radius: 6px;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.5);
+    cursor: default;
+  }
+
   @media print{
     body{ background: #fff; padding: 0; }
     .wrap{ max-width: none; margin: 0; }
@@ -481,11 +538,7 @@
     <label for="numberingSelect">編號（選填）</label>
     <select id="numberingSelect">
       <option value="none">不編號</option>
-      <option value="number">1. 2. 3.</option>
-      <option value="upper">A. B. C.</option>
-      <option value="lower">a. b. c.</option>
-      <option value="circle">① ② ③</option>
-      <option value="chinese">一. 二. 三.</option>
+      <option value="number">自動編號（十進位，如 1. / 1.1. / 1.1.1.）</option>
     </select>
 
     <label for="textInput">內容</label>
@@ -528,6 +581,11 @@
   </div>
 </div>
 
+<input type="file" id="imgUploadInput" accept="image/*" style="display:none">
+<div id="imgViewerOverlay" class="hidden">
+  <img id="imgViewerImg" src="" alt="任務照片">
+</div>
+
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js";
@@ -540,6 +598,8 @@ let dragId = null;
 let formMode = 'addRoot';   // 'addRoot' | 'addChild' | 'edit'
 let formParentId = null;
 let formNode = null;
+let lastDeleted = null;      // 供「復原刪除」使用：{ node, list, index }
+let lastDeletedTimer = null;
 const LONG_PRESS_MS = 550;
 
 function uid(){ return 'n' + Math.random().toString(36).slice(2,10); }
@@ -651,42 +711,10 @@ function sanitizeContentHtml(html){
   return container.innerHTML;
 }
 
-/* ---- 編號格式轉換 ---- */
-function numberToLetters(num, upper){
-  let s = '';
-  let n = num;
-  while(n > 0){
-    const rem = (n - 1) % 26;
-    s = String.fromCharCode(65 + rem) + s;
-    n = Math.floor((n - 1) / 26);
-  }
-  return upper ? s : s.toLowerCase();
-}
-function numberToCircled(num){
-  if(num >= 1 && num <= 20) return String.fromCodePoint(0x2460 + (num - 1));
-  return '(' + num + ')';
-}
-function numberToChinese(num){
-  const d = ['','一','二','三','四','五','六','七','八','九'];
-  if(num <= 0) return String(num);
-  if(num < 10) return d[num];
-  if(num < 20) return '十' + (num % 10 === 0 ? '' : d[num % 10]);
-  if(num < 100){
-    const tens = Math.floor(num / 10);
-    const ones = num % 10;
-    return d[tens] + '十' + (ones === 0 ? '' : d[ones]);
-  }
-  return String(num);
-}
-function getNumberingPrefix(type, index){
-  switch(type){
-    case 'number': return index + '.';
-    case 'upper': return numberToLetters(index, true) + '.';
-    case 'lower': return numberToLetters(index, false) + '.';
-    case 'circle': return numberToCircled(index) + '.';
-    case 'chinese': return numberToChinese(index) + '.';
-    default: return '';
-  }
+/* ---- 編號格式：十進位制（1. / 1.1. / 1.1.1. …），會串接父層的編號 ---- */
+function getDecimalPrefix(parentChain, index){
+  const chain = parentChain ? `${parentChain}.${index}` : String(index);
+  return { label: chain + '.', chain };
 }
 function computeDisplayText(node, numberLabel){
   const content = node.content || '';
@@ -701,17 +729,20 @@ function computeDisplayText(node, numberLabel){
 
 /* ---- 資料模型 ---- */
 function blankNode(content){
-  return { id: uid(), content: content, numberingType: 'none', datePos: 'none', dateStr: '', checked:false, collapsed:false, children: [] };
+  return { id: uid(), content: content, numberingType: 'none', datePos: 'none', dateStr: '', checked:false, collapsed:false, images: [], children: [] };
 }
 function migrateNode(n){
   if(n.content === undefined){
     n.content = n.text !== undefined ? n.text : '';
   }
-  n.numberingType = n.numberingType || 'none';
+  // 舊版有 number/upper/lower/circle/chinese 五種各層獨立符號，
+  // 新版改為十進位制自動編號，只要曾經是「有編號」就一律轉成 'number'。
+  n.numberingType = (n.numberingType && n.numberingType !== 'none') ? 'number' : 'none';
   n.datePos = n.datePos || 'none';
   n.dateStr = n.dateStr || '';
   n.checked = !!n.checked;
   n.collapsed = !!n.collapsed;
+  n.images = Array.isArray(n.images) ? n.images : [];
   n.children = (n.children || []).map(migrateNode);
   return n;
 }
@@ -762,6 +793,55 @@ function locate(list, id){
     if(found) return found;
   }
   return null;
+}
+function countAllNodes(list){
+  let count = 0;
+  for(const n of list){
+    count += 1 + countAllNodes(n.children || []);
+  }
+  return count;
+}
+function showUndoToast(taskLabel){
+  const old = document.getElementById('undoToast');
+  if(old) old.remove();
+  clearTimeout(lastDeletedTimer);
+
+  const toast = document.createElement('div');
+  toast.id = 'undoToast';
+  toast.style.cssText = [
+    'position:fixed', 'left:50%', 'bottom:24px', 'transform:translateX(-50%)',
+    'background:var(--ink)', 'color:#fff', 'padding:10px 14px', 'border-radius:8px',
+    'font-size:13px', 'display:flex', 'align-items:center', 'gap:12px',
+    'box-shadow:0 6px 18px rgba(0,0,0,0.32)', 'z-index:300', 'max-width:90vw'
+  ].join(';');
+
+  const msg = document.createElement('span');
+  msg.textContent = `已刪除「${taskLabel}」`;
+  msg.style.cssText = 'white-space:nowrap; overflow:hidden; text-overflow:ellipsis;';
+
+  const undoBtn = document.createElement('button');
+  undoBtn.type = 'button';
+  undoBtn.textContent = '復原';
+  undoBtn.style.cssText = 'background:#fff; color:var(--navy); border:none; border-radius:5px; padding:5px 10px; font-size:12.5px; font-weight:600; cursor:pointer; flex-shrink:0;';
+  undoBtn.addEventListener('click', () => {
+    if(lastDeleted){
+      const idx = Math.min(lastDeleted.index, lastDeleted.list.length);
+      lastDeleted.list.splice(idx, 0, lastDeleted.node);
+      lastDeleted = null;
+      scheduleSave();
+      render();
+    }
+    toast.remove();
+  });
+
+  toast.appendChild(msg);
+  toast.appendChild(undoBtn);
+  document.body.appendChild(toast);
+
+  lastDeletedTimer = setTimeout(() => {
+    toast.remove();
+    lastDeleted = null;
+  }, 8000);
 }
 function moveNode(draggedId, targetId, position){
   if(draggedId === targetId) return false;
@@ -960,6 +1040,79 @@ function scrollToTask(targetId){
   });
 }
 
+function findNodeById(list, id){
+  const path = findPathToNode(list, id, []);
+  return path ? path[path.length - 1] : null;
+}
+
+/* ---- 照片上傳（imgbb）---- */
+const IMGBB_API_KEY = 'd538d7f3d6b952c7a23fd012edc82d7a';
+let pendingUploadNodeId = null;
+let pendingUploadBtn = null;
+function startImageUpload(nodeId, btnEl){
+  pendingUploadNodeId = nodeId;
+  pendingUploadBtn = btnEl;
+  const input = document.getElementById('imgUploadInput');
+  input.value = '';
+  input.click();
+}
+async function uploadToImgbb(file){
+  const formData = new FormData();
+  formData.append('image', file);
+  const res = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`, {
+    method: 'POST',
+    body: formData
+  });
+  const data = await res.json();
+  if(!data || !data.success) throw new Error((data && data.error && data.error.message) || '上傳失敗');
+  return data.data.url;
+}
+document.getElementById('imgUploadInput').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  const nodeId = pendingUploadNodeId;
+  const btnEl = pendingUploadBtn;
+  pendingUploadNodeId = null;
+  pendingUploadBtn = null;
+  if(!file || !nodeId) return;
+  if(btnEl){
+    btnEl.textContent = '⏳';
+    btnEl.disabled = true;
+  }
+  try{
+    const url = await uploadToImgbb(file);
+    const node = findNodeById(state.tasks, nodeId);
+    if(node){
+      node.images = node.images || [];
+      node.images.push(url);
+      scheduleSave();
+    }
+  }catch(err){
+    alert('照片上傳失敗：' + (err && err.message ? err.message : '請稍後再試'));
+  }
+  render();
+});
+
+function openImageViewer(url){
+  document.getElementById('imgViewerImg').src = url;
+  document.getElementById('imgViewerOverlay').classList.remove('hidden');
+}
+function closeImageViewer(){
+  document.getElementById('imgViewerOverlay').classList.add('hidden');
+  document.getElementById('imgViewerImg').src = '';
+}
+document.getElementById('imgViewerOverlay').addEventListener('click', closeImageViewer);
+
+function confirmDeleteImage(nodeId, idx){
+  if(confirm('確定要刪除這張照片嗎？此動作無法復原。')){
+    const node = findNodeById(state.tasks, nodeId);
+    if(node && Array.isArray(node.images)){
+      node.images.splice(idx, 1);
+      scheduleSave();
+      render();
+    }
+  }
+}
+
 function render(){
   if(titleEl.getAttribute('contenteditable') !== 'true'){
     titleEl.textContent = state.title;
@@ -971,25 +1124,28 @@ function render(){
     emptyMsg.style.display = 'block';
   } else {
     emptyMsg.style.display = 'none';
-    root.appendChild(renderList(state.tasks, 0));
+    root.appendChild(renderList(state.tasks, 0, ''));
   }
 }
 
-function renderList(list, depth){
+function renderList(list, depth, parentChain){
   const frag = document.createDocumentFragment();
-  const counters = {};
+  let counter = 0;
   list.forEach(node => {
     let numberLabel = '';
+    let chainForChildren = parentChain;
     if(node.numberingType && node.numberingType !== 'none'){
-      counters[node.numberingType] = (counters[node.numberingType] || 0) + 1;
-      numberLabel = getNumberingPrefix(node.numberingType, counters[node.numberingType]);
+      counter++;
+      const { label, chain } = getDecimalPrefix(parentChain, counter);
+      numberLabel = label;
+      chainForChildren = chain;
     }
-    frag.appendChild(renderNode(node, depth, numberLabel));
+    frag.appendChild(renderNode(node, depth, numberLabel, chainForChildren));
   });
   return frag;
 }
 
-function renderNode(node, depth, numberLabel){
+function renderNode(node, depth, numberLabel, chainForChildren){
   const li = document.createElement('li');
   li.dataset.depth = depth;
   li.dataset.id = node.id;
@@ -1024,37 +1180,108 @@ function renderNode(node, depth, numberLabel){
     });
   });
 
-  const btnrow = document.createElement('div');
-  btnrow.className = 'btnrow';
-
   const editBtn = document.createElement('button');
-  editBtn.className = 'iconbtn edit';
+  editBtn.type = 'button';
+  editBtn.className = 'iconbtn edit inline-icon';
   editBtn.textContent = '✎';
   editBtn.title = '編輯這筆任務';
-  editBtn.addEventListener('click', () => openTaskForm({ mode: 'edit', node }));
+  editBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    openTaskForm({ mode: 'edit', node });
+  });
 
   const addBtn = document.createElement('button');
-  addBtn.className = 'iconbtn add';
+  addBtn.type = 'button';
+  addBtn.className = 'iconbtn add inline-icon';
   addBtn.textContent = '+';
   addBtn.title = '新增子任務';
-  addBtn.addEventListener('click', () => openTaskForm({ mode: 'addChild', parentId: node.id }));
+  addBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    openTaskForm({ mode: 'addChild', parentId: node.id });
+  });
 
   const delBtn = document.createElement('button');
-  delBtn.className = 'iconbtn del';
+  delBtn.type = 'button';
+  delBtn.className = 'iconbtn del inline-icon';
   delBtn.textContent = '\u2212';
   delBtn.title = '刪除此任務（含子任務）';
-  delBtn.addEventListener('click', () => {
-    extractNode(state.tasks, node.id);
+  delBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const label = (stripHtml(node.content) || '').replace(/\s+/g, ' ').trim() || '（無標題任務）';
+    const preview = label.length > 24 ? label.slice(0, 24) + '…' : label;
+    const childCount = countAllNodes(node.children || []);
+    const msg = childCount > 0
+      ? `確定要刪除「${preview}」嗎？\n這會一併刪除其下 ${childCount} 個子任務。`
+      : `確定要刪除「${preview}」嗎？`;
+    if(!confirm(msg)) return;
+    const loc = locate(state.tasks, node.id);
+    const removed = extractNode(state.tasks, node.id);
+    if(removed && loc){
+      lastDeleted = { node: removed, list: loc.list, index: loc.index };
+      showUndoToast(preview);
+    }
     scheduleSave();
     render();
   });
 
-  btnrow.appendChild(editBtn);
-  btnrow.appendChild(addBtn);
-  btnrow.appendChild(delBtn);
+  const imgRow = document.createElement('div');
+  imgRow.className = 'imgrow';
+  const cloudBtn = document.createElement('button');
+  cloudBtn.type = 'button';
+  cloudBtn.className = 'cloud-btn';
+  cloudBtn.textContent = '☁️';
+  cloudBtn.title = (node.images && node.images.length) ? '再上傳一張照片' : '上傳照片';
+  cloudBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    startImageUpload(node.id, cloudBtn);
+  });
+  imgRow.appendChild(cloudBtn);
+  (node.images || []).forEach((url, idx) => {
+    const clipBtn = document.createElement('button');
+    clipBtn.type = 'button';
+    clipBtn.className = 'clip-btn';
+    clipBtn.textContent = '📎';
+    clipBtn.title = `查看第 ${idx + 1} 張照片（長按可刪除）`;
+
+    let pressTimer = null;
+    let longPressFired = false;
+    const LONG_PRESS_DELETE_MS = 550;
+
+    const startPress = () => {
+      longPressFired = false;
+      clearTimeout(pressTimer);
+      pressTimer = setTimeout(() => {
+        longPressFired = true;
+        if(navigator.vibrate) navigator.vibrate(10);
+        confirmDeleteImage(node.id, idx);
+      }, LONG_PRESS_DELETE_MS);
+    };
+    const cancelPress = () => { clearTimeout(pressTimer); };
+
+    clipBtn.addEventListener('mousedown', (e) => { e.preventDefault(); startPress(); });
+    clipBtn.addEventListener('mouseup', cancelPress);
+    clipBtn.addEventListener('mouseleave', cancelPress);
+    clipBtn.addEventListener('touchstart', startPress, { passive: true });
+    clipBtn.addEventListener('touchend', cancelPress);
+    clipBtn.addEventListener('touchcancel', cancelPress);
+    clipBtn.addEventListener('touchmove', cancelPress);
+
+    clipBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if(longPressFired){ longPressFired = false; return; }
+      openImageViewer(url);
+    });
+    imgRow.appendChild(clipBtn);
+  });
+
+  // 編輯筆、雲朵／迴紋針、新增／刪除，全部緊接在文字（或展開三角形）後面，同一行顯示
+  text.appendChild(editBtn);
+  text.appendChild(imgRow);
+  text.appendChild(addBtn);
+  text.appendChild(delBtn);
+
   row.appendChild(cb);
   row.appendChild(text);
-  row.appendChild(btnrow);
   li.appendChild(row);
 
   attachRowInteractions(row, li, node);
@@ -1091,7 +1318,7 @@ function renderNode(node, depth, numberLabel){
   if(hasChildren && !node.collapsed){
     const ul = document.createElement('ul');
     ul.className = 'tree';
-    ul.appendChild(renderList(node.children, depth + 1));
+    ul.appendChild(renderList(node.children, depth + 1, chainForChildren));
     li.appendChild(ul);
   }
 
