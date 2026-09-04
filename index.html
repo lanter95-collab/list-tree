@@ -163,6 +163,7 @@
   .tri-end{
     display: inline-block;
     margin-left: 8px;
+    margin-right: 26px;
     color: var(--slate);
     font-size: 11px;
     font-weight: 400;
@@ -586,6 +587,9 @@
   <img id="imgViewerImg" src="" alt="任務照片">
 </div>
 
+<!-- 這個環境專屬的設定（Firebase帳號等），不隨主程式碼同步，每個部署地點各自保留一份 -->
+<script src="config.js"></script>
+
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js";
@@ -950,6 +954,9 @@ function attachRowInteractions(row, li, node){
     if(!longPressFired){
       if(!touchCancelled && !(e.target && e.target.closest && e.target.closest('input,button,a,.task-ref'))){
         if(node.children.length){
+          // 避免手機在 touchend 後又補發一次合成的 click 事件，導致收合狀態被連續切換兩次
+          // （表現出來就是「點一下，展開又立刻縮回去」）
+          e.preventDefault();
           node.collapsed = !node.collapsed;
           scheduleSave();
           render();
@@ -1676,16 +1683,18 @@ panel.addEventListener('drop', (e) => {
 });
 
 /* ---- Firebase 雲端同步 ---- */
-// ▼▼▼ 請換成你自己 Firebase 專案「網頁應用程式」的設定值 ▼▼▼
-// 位置：Firebase 主控台 → 齒輪圖示「專案設定」→ 一般 → 往下捲到「你的應用程式」
-// → 選你的 Web App（沒有就先新增一個）→ 複製 firebaseConfig 物件貼在這裡
-const firebaseConfig = {
-  apiKey: "AIzaSyDuwAcj68H7ntSDZxLCuYiR4anHDDZ-rYA",
-  authDomain: "list-tree.firebaseapp.com",
-  projectId: "list-tree",
-  storageBucket: "list-tree.firebasestorage.app",
-  messagingSenderId: "747810820130",
-  appId: "1:747810820130:web:b16d7d6ada64864c55ba7b"
+// 這個環境的 Firebase 設定值，寫在外部的 config.js（跟這支程式碼分開，不會被同步覆蓋）
+// 如果沒有正確載入 config.js，這裡會提早報錯並提示你檢查
+if(!window.FIREBASE_CONFIG){
+  console.error('找不到 window.FIREBASE_CONFIG，請確認 config.js 是否存在、是否正確載入。');
+}
+const firebaseConfig = window.FIREBASE_CONFIG || {
+  apiKey: "",
+  authDomain: "",
+  projectId: "",
+  storageBucket: "",
+  messagingSenderId: "",
+  appId: ""
 };
 // ▲▲▲ ---------------------------------------------------------- ▲▲▲
 
