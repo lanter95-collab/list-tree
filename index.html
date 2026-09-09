@@ -378,11 +378,80 @@
     line-height:1.1;
   }
   .rte-highlight-icon{ border-bottom-color:#F2C230; background:none; }
-  .rte-color-input{
-    position:absolute; inset:0;
-    width:100%; height:100%;
-    opacity:0; cursor:pointer; border:none; padding:0;
+  .rte-color-input-hidden{
+    position:absolute; width:1px; height:1px;
+    opacity:0; overflow:hidden; border:none; padding:0;
+    pointer-events:none;
   }
+
+  /* ---- 顏色色盤彈出視窗 ---- */
+  .color-popover{
+    position: fixed;
+    z-index: 80;
+    background: var(--paper);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+    padding: 10px;
+    width: 258px;
+    max-height: 70vh;
+    overflow-y: auto;
+  }
+  .color-popover.hidden{ display:none; }
+  .color-popover .cp-label{
+    font-size: 11px;
+    color: var(--slate);
+    font-family: 'IBM Plex Mono', monospace;
+    margin: 6px 0 5px;
+  }
+  .color-popover .cp-label:first-child{ margin-top: 0; }
+  .cp-grid{
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 6px;
+  }
+  .cp-grid-10{
+    display: grid;
+    grid-template-columns: repeat(10, 1fr);
+    gap: 3px;
+  }
+  .cp-swatch{
+    width: 22px; height: 22px;
+    border-radius: 5px;
+    border: 1px solid rgba(0,0,0,0.15);
+    cursor: pointer;
+    padding: 0;
+  }
+  .cp-grid-10 .cp-swatch{ width:100%; height:20px; border-radius:2px; }
+  .cp-swatch:hover{ transform: scale(1.15); box-shadow: 0 0 0 2px var(--navy-dim); position:relative; z-index:1; }
+  .cp-swatch.cp-none, .cp-row-swatch.cp-none{
+    background:
+      linear-gradient(to top right, transparent calc(50% - 1px), var(--red), transparent calc(50% + 1px)),
+      var(--paper);
+  }
+  .cp-row-btn{
+    display:flex; align-items:center; gap:8px;
+    width:100%;
+    background:none; border:none; cursor:pointer;
+    padding: 5px 4px;
+    border-radius: 5px;
+    font-size: 12.5px;
+    color: var(--ink);
+    font-family: inherit;
+    text-align:left;
+  }
+  .cp-row-btn:hover{ background:#F0EFEA; }
+  .cp-row-btn .cp-row-swatch{
+    width:18px; height:18px;
+    border-radius:4px;
+    border:1px solid rgba(0,0,0,0.15);
+    flex-shrink:0;
+  }
+  .cp-row-btn .cp-more-icon{
+    width:18px; height:18px; border-radius:4px; flex-shrink:0;
+    background: conic-gradient(red, yellow, lime, cyan, blue, magenta, red);
+  }
+  .cp-divider{ border:none; border-top:1px solid var(--border); margin:8px 0; }
   .rte-editor{
     width: 100%;
     min-height: 64px;
@@ -549,11 +618,11 @@
       <button type="button" class="rte-btn" id="rteUnderline" title="底線"><u>U</u></button>
       <button type="button" class="rte-btn" id="rteColorBtn" title="文字顏色">
         <span class="rte-color-icon">A</span>
-        <input type="color" id="rteColorInput" class="rte-color-input" value="#B23A2F">
+        <input type="color" id="rteColorInput" class="rte-color-input-hidden" value="#B23A2F" tabindex="-1">
       </button>
       <button type="button" class="rte-btn" id="rteHighlightBtn" title="文字背景色">
         <span class="rte-highlight-icon">A</span>
-        <input type="color" id="rteHighlightInput" class="rte-color-input" value="#FFF176">
+        <input type="color" id="rteHighlightInput" class="rte-color-input-hidden" value="#FFF176" tabindex="-1">
       </button>
       <button type="button" class="rte-btn" id="rteLink" title="關聯到其他任務">🔗</button>
       <button type="button" class="rte-btn" id="rteClear" title="清除格式">⨯</button>
@@ -1475,7 +1544,12 @@ function applyRTECommand(cmd, value){
   editor.focus();
   restoreRTESelection();
   try{ document.execCommand('styleWithCSS', false, true); }catch(err){}
-  document.execCommand(cmd, false, value);
+  try{
+    const ok = document.execCommand(cmd, false, value);
+    if(!ok && cmd === 'hiliteColor') document.execCommand('backColor', false, value);
+  }catch(err){
+    if(cmd === 'hiliteColor') document.execCommand('backColor', false, value);
+  }
   saveRTESelection();
 }
 // 一般按鈕：用 mousedown 阻止預設行為，讓編輯區的選取文字不會被搶走焦點
@@ -1486,14 +1560,184 @@ document.getElementById('rteBold').addEventListener('click', () => applyRTEComma
 document.getElementById('rteItalic').addEventListener('click', () => applyRTECommand('italic'));
 document.getElementById('rteUnderline').addEventListener('click', () => applyRTECommand('underline'));
 document.getElementById('rteClear').addEventListener('click', () => applyRTECommand('removeFormat'));
-// 顏色／背景色：<input type=color> 開啟原生選色器會搶走焦點，所以先記住選取範圍，選色後再套用
-document.getElementById('rteColorBtn').addEventListener('mousedown', saveRTESelection);
-document.getElementById('rteHighlightBtn').addEventListener('mousedown', saveRTESelection);
-document.getElementById('rteColorInput').addEventListener('input', (e) => applyRTECommand('foreColor', e.target.value));
-document.getElementById('rteHighlightInput').addEventListener('input', (e) => {
-  try{ applyRTECommand('hiliteColor', e.target.value); }
-  catch(err){ applyRTECommand('backColor', e.target.value); }
-});
+
+/* ---- 文字顏色／背景色：Word 風格色盤（自動／最近使用／佈景主題色彩／標準色彩／其他色彩）---- */
+function hexToRgb(hex){
+  const h = hex.replace('#','');
+  return [parseInt(h.substr(0,2),16), parseInt(h.substr(2,2),16), parseInt(h.substr(4,2),16)];
+}
+function rgbToHex(r,g,b){
+  const c = v => Math.max(0,Math.min(255,Math.round(v))).toString(16).padStart(2,'0');
+  return '#' + c(r) + c(g) + c(b);
+}
+function mixColor(hex, targetHex, percent){
+  const [r,g,b] = hexToRgb(hex);
+  const [tr,tg,tb] = hexToRgb(targetHex);
+  return rgbToHex(r + (tr-r)*percent, g + (tg-g)*percent, b + (tb-b)*percent);
+}
+function tintColor(hex, percent){ return mixColor(hex, '#FFFFFF', percent); }
+function shadeColor(hex, percent){ return mixColor(hex, '#000000', percent); }
+function themeColumn(hex){
+  return [hex, tintColor(hex,0.8), tintColor(hex,0.6), tintColor(hex,0.4), shadeColor(hex,0.25), shadeColor(hex,0.5)];
+}
+
+const THEME_BASE_COLORS = ['#FFFFFF','#000000','#EEECE1','#1F497D','#4F81BD','#C0504D','#9BBB59','#8064A2','#4BACC6','#F79646'];
+const STANDARD_COLORS   = ['#C00000','#FF0000','#FFC000','#FFFF00','#92D050','#00B050','#00B0F0','#0070C0','#002060','#7030A0'];
+const RECENT_KEY_PREFIX = 'taskTreeRecentColors_';
+
+function loadRecentColors(kind){
+  try{
+    const raw = localStorage.getItem(RECENT_KEY_PREFIX + kind);
+    return raw ? JSON.parse(raw) : [];
+  }catch(err){ return []; }
+}
+function saveRecentColor(kind, hex){
+  let list = loadRecentColors(kind).filter(c => c.toLowerCase() !== hex.toLowerCase());
+  list.unshift(hex);
+  list = list.slice(0, 10);
+  try{ localStorage.setItem(RECENT_KEY_PREFIX + kind, JSON.stringify(list)); }catch(err){}
+}
+
+function buildColorPopover(kind, nativeInput, execCmd){
+  const pop = document.createElement('div');
+  pop.className = 'color-popover hidden';
+
+  const applyColor = (hex) => {
+    applyRTECommand(execCmd, hex);
+    if(hex !== 'transparent') saveRecentColor(kind, hex);
+    closePopover();
+  };
+  const editorFocusAndRestore = () => {
+    const editor = document.getElementById('textInput');
+    editor.focus();
+    restoreRTESelection();
+  };
+  const closePopover = () => pop.classList.add('hidden');
+
+  const makeSwatch = (hex) => {
+    const sw = document.createElement('button');
+    sw.type = 'button';
+    sw.className = 'cp-swatch';
+    sw.style.background = hex;
+    sw.title = hex;
+    sw.addEventListener('mousedown', (e) => e.preventDefault());
+    sw.addEventListener('click', () => applyColor(hex));
+    return sw;
+  };
+  const makeGrid10 = (colors) => {
+    const grid = document.createElement('div');
+    grid.className = 'cp-grid-10';
+    colors.forEach(hex => grid.appendChild(makeSwatch(hex)));
+    return grid;
+  };
+  const makeLabel = (text) => {
+    const l = document.createElement('div');
+    l.className = 'cp-label';
+    l.textContent = text;
+    return l;
+  };
+  const makeDivider = () => {
+    const hr = document.createElement('hr');
+    hr.className = 'cp-divider';
+    return hr;
+  };
+
+  const renderSwatches = () => {
+    pop.innerHTML = '';
+
+    // 自動（文字：預設墨色／背景：清除底色）
+    const autoBtn = document.createElement('button');
+    autoBtn.type = 'button';
+    autoBtn.className = 'cp-row-btn';
+    const autoSwatch = document.createElement('span');
+    autoSwatch.className = 'cp-row-swatch';
+    autoSwatch.style.background = kind === 'text' ? '#1E2223' : 'var(--paper)';
+    if(kind === 'bg') autoSwatch.classList.add('cp-none');
+    autoBtn.appendChild(autoSwatch);
+    autoBtn.appendChild(document.createTextNode(kind === 'text' ? '自動' : '清除背景色'));
+    autoBtn.addEventListener('mousedown', (e) => e.preventDefault());
+    autoBtn.addEventListener('click', () => applyColor(kind === 'text' ? '#1E2223' : 'transparent'));
+    pop.appendChild(autoBtn);
+
+    // 最近使用的色彩
+    const recent = loadRecentColors(kind);
+    if(recent.length){
+      pop.appendChild(makeDivider());
+      pop.appendChild(makeLabel('最近使用的色彩'));
+      pop.appendChild(makeGrid10(recent));
+    }
+
+    // 佈景主題色彩（含深淺漸層）
+    pop.appendChild(makeDivider());
+    pop.appendChild(makeLabel('佈景主題色彩'));
+    const columns = THEME_BASE_COLORS.map(themeColumn);
+    for(let row = 0; row < 6; row++){
+      pop.appendChild(makeGrid10(columns.map(col => col[row])));
+    }
+
+    // 標準色彩
+    pop.appendChild(makeDivider());
+    pop.appendChild(makeLabel('標準色彩'));
+    pop.appendChild(makeGrid10(STANDARD_COLORS));
+
+    // 其他色彩…（原生選色器，供特殊色碼使用）
+    pop.appendChild(makeDivider());
+    const moreBtn = document.createElement('button');
+    moreBtn.type = 'button';
+    moreBtn.className = 'cp-row-btn';
+    const moreIcon = document.createElement('span');
+    moreIcon.className = 'cp-more-icon';
+    moreBtn.appendChild(moreIcon);
+    moreBtn.appendChild(document.createTextNode('其他色彩…'));
+    moreBtn.addEventListener('mousedown', (e) => e.preventDefault());
+    moreBtn.addEventListener('click', () => {
+      editorFocusAndRestore();
+      nativeInput.click();
+    });
+    pop.appendChild(moreBtn);
+  };
+
+  document.body.appendChild(pop);
+  return { pop, renderSwatches, closePopover };
+}
+
+function setupColorButton(btnId, kind, nativeInputId, execCmd){
+  const btn = document.getElementById(btnId);
+  const nativeInput = document.getElementById(nativeInputId);
+  const { pop, renderSwatches, closePopover } = buildColorPopover(kind, nativeInput, execCmd);
+
+  btn.addEventListener('mousedown', (e) => e.preventDefault());
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    saveRTESelection();
+    const isHidden = pop.classList.contains('hidden');
+    document.querySelectorAll('.color-popover').forEach(p => p.classList.add('hidden'));
+    if(isHidden){
+      renderSwatches();
+      const rect = btn.getBoundingClientRect();
+      const popWidth = 258;
+      pop.style.top = (rect.bottom + 6) + 'px';
+      pop.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - popWidth - 12)) + 'px';
+      pop.classList.remove('hidden');
+    }
+  });
+
+  // 進階自訂色碼（原生選色器）：拖曳時即時預覽，選定後記錄進「最近使用」
+  nativeInput.addEventListener('input', (e) => applyRTECommand(execCmd, e.target.value));
+  nativeInput.addEventListener('change', (e) => {
+    saveRecentColor(kind, e.target.value);
+    closePopover();
+  });
+
+  document.addEventListener('click', (e) => {
+    if(!pop.contains(e.target) && e.target !== btn && !btn.contains(e.target)){
+      closePopover();
+    }
+  });
+}
+setupColorButton('rteColorBtn', 'text', 'rteColorInput', 'foreColor');
+setupColorButton('rteHighlightBtn', 'bg', 'rteHighlightInput', 'hiliteColor');
+
 
 /* ---- 任務關聯：選取文字 → 挑選要連結的任務 ---- */
 let pendingLinkRange = null;
