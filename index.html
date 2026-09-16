@@ -109,8 +109,6 @@
     padding: 18px 14px 22px;
     box-shadow: 0 1px 0 var(--border);
     min-height: 120px;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
   }
   .panel.drag-target{ box-shadow: 0 0 0 2px var(--teal) inset; }
 
@@ -171,7 +169,7 @@
     vertical-align: 1px;
   }
 
-  /* 編輯筆／雲朵／迴紋針：緊接在文字（或三角形）後面，同一行內顯示 */
+  /* 編輯筆／雲朵／照片圖示：緊接在文字（或三角形）後面，同一行內顯示 */
   .text .iconbtn.inline-icon{
     display: inline-flex;
     width: 22px; height: 22px;
@@ -223,6 +221,10 @@
     -webkit-user-select: none;
     user-select: none;
   }
+  /* 防呆：內容萬一混進 div／p 這類區塊元素（例如富文本編輯器換行時產生的），
+     一律當成行內元素處理，避免它們無視 white-space:pre 自己換行，
+     導致超長文字不會觸發 .panel 的水平捲軸 */
+  .text div, .text p{ display: inline; }
   .text a.task-link{
     color: var(--teal);
     text-decoration: underline;
@@ -509,7 +511,7 @@
   .link-result-item:last-child{ border-bottom:none; }
   .link-result-item:hover{ background: #F7F6F2; }
 
-  /* ---- 照片上傳（雲朵／迴紋針）---- */
+  /* ---- 照片上傳（雲朵／照片圖示）---- */
   .imgrow{
     display:flex;
     align-items:center;
@@ -741,6 +743,10 @@ function sanitizeContentHtml(html){
           el = span;
         }
         if(!RTE_ALLOWED_TAGS.has(el.tagName)){
+          const isBlock = (el.tagName === 'DIV' || el.tagName === 'P');
+          if(isBlock && el.previousSibling){
+            parent.insertBefore(document.createElement('br'), el);
+          }
           while(el.firstChild) parent.insertBefore(el.firstChild, el);
           parent.removeChild(el);
           return;
@@ -1316,7 +1322,7 @@ function renderNode(node, depth, numberLabel, chainForChildren){
     const clipBtn = document.createElement('button');
     clipBtn.type = 'button';
     clipBtn.className = 'clip-btn';
-    clipBtn.textContent = '📎';
+    clipBtn.textContent = '📷';
     clipBtn.title = `查看第 ${idx + 1} 張照片（長按可刪除）`;
 
     let pressTimer = null;
@@ -1350,7 +1356,7 @@ function renderNode(node, depth, numberLabel, chainForChildren){
     imgRow.appendChild(clipBtn);
   });
 
-  // 編輯筆、雲朵／迴紋針、新增／刪除，全部緊接在文字（或展開三角形）後面，同一行顯示
+  // 編輯筆、雲朵／照片圖示、新增／刪除，全部緊接在文字（或展開三角形）後面，同一行顯示
   text.appendChild(editBtn);
   text.appendChild(imgRow);
   text.appendChild(addBtn);
@@ -1714,11 +1720,37 @@ function setupColorButton(btnId, kind, nativeInputId, execCmd){
     document.querySelectorAll('.color-popover').forEach(p => p.classList.add('hidden'));
     if(isHidden){
       renderSwatches();
+      pop.classList.remove('hidden');
+      pop.style.maxHeight = '70vh';
+
       const rect = btn.getBoundingClientRect();
       const popWidth = 258;
+      const margin = 10;
+      const left = Math.max(margin, Math.min(rect.left, window.innerWidth - popWidth - margin));
+      pop.style.left = left + 'px';
       pop.style.top = (rect.bottom + 6) + 'px';
-      pop.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - popWidth - 12)) + 'px';
-      pop.classList.remove('hidden');
+
+      // 量測實際內容高度，確保整個色盤都落在畫面可視範圍內，
+      // 不夠空間就改往上展開，兩邊都不夠的話就貼齊畫面、靠內部捲動看剩下的內容
+      const popHeight = pop.scrollHeight;
+      const spaceBelow = window.innerHeight - rect.bottom - 6 - margin;
+      const spaceAbove = rect.top - 6 - margin;
+      let top, maxH;
+      if(popHeight <= spaceBelow){
+        top = rect.bottom + 6;
+        maxH = '70vh';
+      } else if(popHeight <= spaceAbove){
+        top = rect.top - 6 - popHeight;
+        maxH = '70vh';
+      } else if(spaceAbove > spaceBelow){
+        top = margin;
+        maxH = Math.max(150, spaceAbove) + 'px';
+      } else {
+        top = rect.bottom + 6;
+        maxH = Math.max(150, spaceBelow) + 'px';
+      }
+      pop.style.top = Math.max(margin, top) + 'px';
+      pop.style.maxHeight = maxH;
     }
   });
 
