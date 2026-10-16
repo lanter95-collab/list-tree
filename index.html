@@ -240,6 +240,9 @@
     letter-spacing: .01em;
   }
   li[data-depth="0"] > .row .text:not(.checked){ color: var(--navy); }
+  /* 同一層兄弟任務中最新的一筆，預設黑色粗體；
+     手動在內容裡設定的顏色／粗細（行內 style）具有更高優先權，不會被這條蓋掉 */
+  .text.is-latest-sibling:not(.checked){ color: #000; font-weight: 700; }
   .text.checked{
     color: var(--slate);
     text-decoration: line-through;
@@ -790,6 +793,24 @@ function sanitizeContentHtml(html){
   return container.innerHTML;
 }
 
+/* ---- 同層兄弟中「誰最新」的判斷：有日期的比日期（晚的優先），
+   日期相同或都沒填日期時比建立時間（晚的優先）---- */
+function compareRecency(a, b){
+  const aHasDate = !!a.dateStr;
+  const bHasDate = !!b.dateStr;
+  if(aHasDate !== bHasDate) return aHasDate ? 1 : -1;
+  if(aHasDate && a.dateStr !== b.dateStr) return a.dateStr > b.dateStr ? 1 : -1;
+  return (a.createdAt || 0) - (b.createdAt || 0);
+}
+function findLatestSiblingId(list){
+  if(!list.length) return null;
+  let latest = list[0];
+  for(let i = 1; i < list.length; i++){
+    if(compareRecency(list[i], latest) > 0) latest = list[i];
+  }
+  return latest.id;
+}
+
 /* ---- 編號格式：十進位制（1. / 1.1. / 1.1.1. …），會串接父層的編號 ---- */
 function getDecimalPrefix(parentChain, index){
   const chain = parentChain ? `${parentChain}.${index}` : String(index);
@@ -808,7 +829,7 @@ function computeDisplayText(node, numberLabel){
 
 /* ---- 資料模型 ---- */
 function blankNode(content){
-  return { id: uid(), content: content, numberingType: 'none', datePos: 'none', dateStr: '', checked:false, collapsed:false, images: [], children: [] };
+  return { id: uid(), content: content, numberingType: 'none', datePos: 'none', dateStr: '', checked:false, collapsed:false, images: [], createdAt: Date.now(), children: [] };
 }
 function migrateNode(n){
   if(n.content === undefined){
@@ -822,6 +843,8 @@ function migrateNode(n){
   n.checked = !!n.checked;
   n.collapsed = !!n.collapsed;
   n.images = Array.isArray(n.images) ? n.images : [];
+  // 舊資料沒有建立時間，一律當作最舊（0），避免影響「同層最新」的判斷
+  n.createdAt = (typeof n.createdAt === 'number') ? n.createdAt : 0;
   n.children = (n.children || []).map(migrateNode);
   return n;
 }
@@ -1213,6 +1236,7 @@ function render(){
 function renderList(list, depth, parentChain){
   const frag = document.createDocumentFragment();
   let counter = 0;
+  const latestId = findLatestSiblingId(list);
   list.forEach(node => {
     let numberLabel = '';
     let chainForChildren = parentChain;
@@ -1222,12 +1246,12 @@ function renderList(list, depth, parentChain){
       numberLabel = label;
       chainForChildren = chain;
     }
-    frag.appendChild(renderNode(node, depth, numberLabel, chainForChildren));
+    frag.appendChild(renderNode(node, depth, numberLabel, chainForChildren, node.id === latestId));
   });
   return frag;
 }
 
-function renderNode(node, depth, numberLabel, chainForChildren){
+function renderNode(node, depth, numberLabel, chainForChildren, isLatest){
   const li = document.createElement('li');
   li.dataset.depth = depth;
   li.dataset.id = node.id;
@@ -1247,7 +1271,7 @@ function renderNode(node, depth, numberLabel, chainForChildren){
   });
 
   const text = document.createElement('div');
-  text.className = 'text' + (node.checked ? ' checked' : '');
+  text.className = 'text' + (node.checked ? ' checked' : '') + (isLatest ? ' is-latest-sibling' : '');
   let textHtml = linkifyHtml(computeDisplayText(node, numberLabel));
   if(hasChildren){
     const glyph = node.collapsed ? '▶' : '▼';
@@ -1430,8 +1454,6 @@ async function loadPersisted(){
   }catch(err){
     state.tasks = [];
   }
-  setAllCollapsed(state.tasks, false);
-  document.getElementById('collapseAllToggle').checked = false;
   status.textContent = '';
   render();
 }
@@ -2008,20 +2030,15 @@ async function cloudSave(){
 function bindCloudSync(){
   const syncCode = getSyncCode();
   cloudDocRef = doc(db, 'taskTrees', syncCode);
-  let firstSnapshot = true;
   onSnapshot(cloudDocRef, (snap) => {
     const status = document.getElementById('statusLine');
     if(snap.exists()){
       const data = snap.data();
       applyingRemote = true;
       state.title = data.title || state.title;
+      // 每筆任務自己的收合／展開狀態（node.collapsed）會跟著資料一起存、一起讀，
+      // 這裡不再強制重設，重新整理或切換裝置後會維持你上次離開時的樣子
       state.tasks = (data.tasks || []).map(migrateNode);
-      if(firstSnapshot){
-        // 每次開啟／切換清單時，預設全部展開
-        setAllCollapsed(state.tasks, false);
-        document.getElementById('collapseAllToggle').checked = false;
-        firstSnapshot = false;
-      }
       render();
       applyingRemote = false;
       if(!snap.metadata.hasPendingWrites){
@@ -2031,7 +2048,6 @@ function bindCloudSync(){
     } else {
       // 這組同步代碼在雲端還沒有資料，建立一份空白清單（不再自動帶入範例資料）
       state.tasks = [];
-      firstSnapshot = false;
       render();
       cloudSave();
     }
