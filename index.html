@@ -169,6 +169,21 @@
     vertical-align: 1px;
   }
 
+  /* 任務內容本身有換行時：第2行起預設收合，點小箭頭展開 */
+  .line-toggle{
+    display: inline-block;
+    margin: 0 4px;
+    color: var(--slate);
+    font-size: 10px;
+    font-weight: 400;
+    user-select: none;
+    vertical-align: 1px;
+    cursor: pointer;
+  }
+  .line-toggle:hover{ color: var(--teal); }
+  .extra-lines{ display: none; }
+  .extra-lines.expanded{ display: inline; }
+
   /* 編輯筆／雲朵／照片圖示：緊接在文字（或三角形）後面，同一行內顯示 */
   .text .iconbtn.inline-icon{
     display: inline-flex;
@@ -678,6 +693,10 @@ let formParentId = null;
 let formNode = null;
 let lastDeleted = null;      // 供「復原刪除」使用：{ node, list, index }
 let lastDeletedTimer = null;
+// 內容斷行後，使用者點開「展開」的任務 id 集合。
+// 刻意不存進 state／不寫入 localStorage 或 Firestore：只存在記憶體裡，
+// 重新整理網頁（頁面重新載入）後這個 Set 會被重建成空的，等於自動恢復收合。
+const expandedLineIds = new Set();
 const LONG_PRESS_MS = 550;
 
 function uid(){ return 'n' + Math.random().toString(36).slice(2,10); }
@@ -980,7 +999,7 @@ function attachRowInteractions(row, li, node){
   // 桌面：整列可拖曳（原生 HTML5 拖放，滑鼠按住移動才會觸發，單純點擊不受影響）
   row.draggable = true;
   row.addEventListener('dragstart', (e) => {
-    if(e.target.closest('input,button,a,.task-ref')){ e.preventDefault(); return; }
+    if(e.target.closest('input,button,a,.task-ref,.line-toggle')){ e.preventDefault(); return; }
     dragId = node.id;
     e.dataTransfer.setData('text/plain', node.id);
     e.dataTransfer.effectAllowed = 'move';
@@ -988,7 +1007,7 @@ function attachRowInteractions(row, li, node){
 
   // 桌面：單擊（非拖曳）＝ 展開／收合子任務；沒有子任務則沒有作用
   row.addEventListener('click', (e) => {
-    if(e.target.closest('input,button,a,.task-ref')) return;
+    if(e.target.closest('input,button,a,.task-ref,.line-toggle')) return;
     if(!node.children.length) return;
     node.collapsed = !node.collapsed;
     scheduleSave();
@@ -1000,7 +1019,7 @@ function attachRowInteractions(row, li, node){
   let ghost = null, lastRow = null;
 
   row.addEventListener('touchstart', (e) => {
-    if(e.target.closest('input,button,a,.task-ref')) return;
+    if(e.target.closest('input,button,a,.task-ref,.line-toggle')) return;
     const touch = e.touches[0];
     startX = touch.clientX; startY = touch.clientY;
     longPressFired = false; touchCancelled = false;
@@ -1050,7 +1069,7 @@ function attachRowInteractions(row, li, node){
   const finishTouch = (e) => {
     clearTimeout(pressTimer);
     if(!longPressFired){
-      if(!touchCancelled && !(e.target && e.target.closest && e.target.closest('input,button,a,.task-ref'))){
+      if(!touchCancelled && !(e.target && e.target.closest && e.target.closest('input,button,a,.task-ref,.line-toggle'))){
         if(node.children.length){
           // 避免手機在 touchend 後又補發一次合成的 click 事件，導致收合狀態被連續切換兩次
           // （表現出來就是「點一下，展開又立刻縮回去」）
@@ -1273,6 +1292,28 @@ function renderNode(node, depth, numberLabel, chainForChildren, isLatest){
   const text = document.createElement('div');
   text.className = 'text' + (node.checked ? ' checked' : '') + (isLatest ? ' is-latest-sibling' : '');
   let textHtml = linkifyHtml(computeDisplayText(node, numberLabel));
+  // 內容裡若有換行，只預設顯示第一行，其餘行收合在小箭頭後面。
+  // 換行可能是 Shift+Enter 產生的 <br>，也可能是貼上多行文字時留下的純文字換行字元（\n，
+  // 靠 CSS white-space:pre 直接顯示出來），兩種都要抓。
+  // 是否展開只看記憶體中的 expandedLineIds，不會存檔，重新整理網頁就會恢復收合。
+  let hasExtraLines = false;
+  const brRegex = /<br\s*\/?>/i;
+  const brM = brRegex.exec(textHtml);
+  const nlIdx = textHtml.indexOf('\n');
+  let splitIndex = -1;
+  if(brM && (nlIdx === -1 || brM.index <= nlIdx)) splitIndex = brM.index;
+  else if(nlIdx !== -1) splitIndex = nlIdx;
+  if(splitIndex !== -1){
+    hasExtraLines = true;
+    const firstPart = textHtml.slice(0, splitIndex);
+    const restPart = textHtml.slice(splitIndex); // 含最前面那個換行（<br> 或 \n）
+    const expanded = expandedLineIds.has(node.id);
+    const lineGlyph = expanded ? '▾' : '▸';
+    const lineTitle = expanded ? '收合其餘內容' : '展開其餘內容';
+    textHtml = firstPart
+      + ` <span class="line-toggle" data-line-toggle="${node.id}" title="${lineTitle}">${lineGlyph}</span>`
+      + `<span class="extra-lines${expanded ? ' expanded' : ''}">${restPart}</span>`;
+  }
   if(hasChildren){
     const glyph = node.collapsed ? '▶' : '▼';
     const title = node.collapsed ? '展開子任務' : '隱藏子任務';
@@ -1285,6 +1326,17 @@ function renderNode(node, depth, numberLabel, chainForChildren, isLatest){
       scrollToTask(span.dataset.refTarget);
     });
   });
+  if(hasExtraLines){
+    const lineToggle = text.querySelector('.line-toggle');
+    if(lineToggle){
+      lineToggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if(expandedLineIds.has(node.id)) expandedLineIds.delete(node.id);
+        else expandedLineIds.add(node.id);
+        render();
+      });
+    }
+  }
 
   const editBtn = document.createElement('button');
   editBtn.type = 'button';
