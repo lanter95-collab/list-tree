@@ -89,6 +89,10 @@
     margin: -2px 0 10px 2px;
     font-size: 13px;
     color: var(--ink);
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 14px;
   }
   .collapse-all-bar label{
     display: inline-flex;
@@ -100,6 +104,75 @@
   .collapse-all-bar input[type=checkbox]{
     width: 16px; height: 16px;
     margin-top: 0;
+  }
+
+  .search-box{
+    display: inline-flex;
+    align-items: center;
+    flex: 1 1 420px;
+    max-width: 640px;
+    gap: 8px;
+  }
+  #rootTaskSelect{
+    flex: 0 1 200px;
+    min-width: 0;
+    box-sizing: border-box;
+    padding: 6px 8px;
+    border: 2px solid var(--navy, #1E3A5F);
+    border-radius: 6px;
+    font-size: 13px;
+    color: var(--ink);
+    background: #fff;
+  }
+  #rootTaskSelect:focus{
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(30,58,95,0.2);
+  }
+  .keyword-search{
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    flex: 1 1 220px;
+    min-width: 0;
+  }
+  .keyword-search input[type=text]{
+    width: 100%;
+    box-sizing: border-box;
+    padding: 6px 28px 6px 10px;
+    border: 2px solid var(--navy, #1E3A5F);
+    border-radius: 6px;
+    font-size: 13px;
+    color: var(--ink);
+    background: #fff;
+  }
+  .keyword-search input[type=text]:focus{
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(30,58,95,0.2);
+  }
+  .keyword-search .search-clear{
+    position: absolute;
+    right: 4px;
+    top: 50%;
+    transform: translateY(-50%);
+    border: none;
+    background: transparent;
+    color: var(--slate);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 4px 6px;
+  }
+  .keyword-search .search-clear:hover{ color: var(--red); }
+  mark.search-hit{
+    background: #FFE89A;
+    color: inherit;
+    padding: 0 1px;
+    border-radius: 2px;
+  }
+  .search-nomatch{
+    margin: 4px 0 10px 2px;
+    font-size: 13px;
+    color: var(--slate);
   }
 
   .panel{
@@ -575,7 +648,8 @@
   @media print{
     body{ background: #fff; padding: 0; }
     .wrap{ max-width: none; margin: 0; }
-    .toolbar, .status, .btnrow, .tri-end, .collapse-all-bar{ display:none !important; }
+    .toolbar, .status, .btnrow, .tri-end, .collapse-all-bar, .search-nomatch{ display:none !important; }
+    mark.search-hit{ background: none !important; }
     .panel{ border:none; box-shadow:none; padding:0; overflow: visible; }
     .row{ width: auto !important; min-width: 0 !important; }
     .text{ white-space: pre-wrap !important; word-break: break-word; overflow-wrap: break-word; }
@@ -603,9 +677,19 @@
 
   <div class="collapse-all-bar">
     <label><input type="checkbox" id="collapseAllToggle"> 全隱藏</label>
+    <div class="search-box">
+      <select id="rootTaskSelect" title="快速選擇主任務">
+        <option value="">主任務快速選擇…</option>
+      </select>
+      <div class="keyword-search">
+        <input type="text" id="searchInput" placeholder="輸入關鍵字搜尋任務…">
+        <button type="button" id="searchClearBtn" class="search-clear" title="清除搜尋" style="display:none;">×</button>
+      </div>
+    </div>
   </div>
 
   <div class="status" id="statusLine"></div>
+  <div class="search-nomatch" id="searchNoMatch" style="display:none;">找不到符合「<span id="searchNoMatchKeyword"></span>」的任務。</div>
 
   <div class="panel" id="panel">
     <ul class="tree root-list" id="treeRoot"></ul>
@@ -698,6 +782,45 @@ let lastDeletedTimer = null;
 // 重新整理網頁（頁面重新載入）後這個 Set 會被重建成空的，等於自動恢復收合。
 const expandedLineIds = new Set();
 const LONG_PRESS_MS = 550;
+// 關鍵字搜尋：純前端即時篩選，不存檔、不影響資料本身。
+let searchQuery = '';   // 比對用：已 trim、轉小寫
+let searchInputRaw = ''; // 顯示用：使用者實際輸入的原始文字
+function nodeMatchesSearch(node, query){
+  if(!query) return false;
+  const text = stripHtml(node.content || '').toLowerCase();
+  return text.includes(query);
+}
+function subtreeHasMatch(node, query){
+  if(nodeMatchesSearch(node, query)) return true;
+  return (node.children || []).some(c => subtreeHasMatch(c, query));
+}
+function highlightSearchMatches(container, query){
+  if(!query) return;
+  function walk(node){
+    if(node.nodeType === 3){
+      const text = node.nodeValue;
+      const lower = text.toLowerCase();
+      let idx = lower.indexOf(query);
+      if(idx === -1) return;
+      const frag = document.createDocumentFragment();
+      let lastIndex = 0;
+      while(idx !== -1){
+        if(idx > lastIndex) frag.appendChild(document.createTextNode(text.slice(lastIndex, idx)));
+        const mark = document.createElement('mark');
+        mark.className = 'search-hit';
+        mark.textContent = text.slice(idx, idx + query.length);
+        frag.appendChild(mark);
+        lastIndex = idx + query.length;
+        idx = lower.indexOf(query, lastIndex);
+      }
+      if(lastIndex < text.length) frag.appendChild(document.createTextNode(text.slice(lastIndex)));
+      node.parentNode.replaceChild(frag, node);
+    } else if(node.nodeType === 1){
+      Array.from(node.childNodes).forEach(walk);
+    }
+  }
+  Array.from(container.childNodes).forEach(walk);
+}
 
 function uid(){ return 'n' + Math.random().toString(36).slice(2,10); }
 function pad2(n){ return n.toString().padStart(2,'0'); }
@@ -1009,6 +1132,7 @@ function attachRowInteractions(row, li, node){
   row.addEventListener('click', (e) => {
     if(e.target.closest('input,button,a,.task-ref,.line-toggle')) return;
     if(!node.children.length) return;
+    if(searchQuery) return; // 搜尋結果畫面上的展開／收合三角形是暫時的，點整列先不動資料本身
     node.collapsed = !node.collapsed;
     scheduleSave();
     render();
@@ -1070,7 +1194,7 @@ function attachRowInteractions(row, li, node){
     clearTimeout(pressTimer);
     if(!longPressFired){
       if(!touchCancelled && !(e.target && e.target.closest && e.target.closest('input,button,a,.task-ref,.line-toggle'))){
-        if(node.children.length){
+        if(node.children.length && !searchQuery){
           // 避免手機在 touchend 後又補發一次合成的 click 事件，導致收合狀態被連續切換兩次
           // （表現出來就是「點一下，展開又立刻縮回去」）
           e.preventDefault();
@@ -1243,18 +1367,53 @@ function render(){
   }
   const root = document.getElementById('treeRoot');
   const emptyMsg = document.getElementById('emptyMsg');
+  const noMatchEl = document.getElementById('searchNoMatch');
   root.innerHTML = '';
   if(state.tasks.length === 0){
     emptyMsg.style.display = 'block';
+    if(noMatchEl) noMatchEl.style.display = 'none';
   } else {
     emptyMsg.style.display = 'none';
+    const q = searchQuery;
+    const anyMatch = !q || state.tasks.some(n => subtreeHasMatch(n, q));
+    if(noMatchEl){
+      noMatchEl.style.display = (q && !anyMatch) ? 'block' : 'none';
+      if(q){
+        const kw = document.getElementById('searchNoMatchKeyword');
+        if(kw) kw.textContent = searchInputRaw;
+      }
+    }
     root.appendChild(renderList(state.tasks, 0, ''));
   }
+  populateRootTaskSelect();
+}
+
+/* 主任務快速選擇下拉選單：每次 render 都照目前的主任務（根層）重新產生選項 */
+function populateRootTaskSelect(){
+  const sel = document.getElementById('rootTaskSelect');
+  if(!sel) return;
+  sel.innerHTML = '';
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = '主任務快速選擇…';
+  sel.appendChild(placeholder);
+  state.tasks.forEach(node => {
+    const opt = document.createElement('option');
+    opt.value = node.id;
+    let label = (stripHtml(node.content) || '').replace(/\s+/g, ' ').trim() || '（無標題任務）';
+    if(label.length > 28) label = label.slice(0, 28) + '…';
+    opt.textContent = label;
+    opt.title = label;
+    sel.appendChild(opt);
+  });
+  // 每次重繪都還原成「未選擇」，這樣同一筆主任務可以重複點選、每次都會再捲動並閃一下
+  sel.value = '';
 }
 
 function renderList(list, depth, parentChain){
   const frag = document.createDocumentFragment();
   let counter = 0;
+  const q = searchQuery;
   const latestId = findLatestSiblingId(list);
   list.forEach(node => {
     let numberLabel = '';
@@ -1265,6 +1424,9 @@ function renderList(list, depth, parentChain){
       numberLabel = label;
       chainForChildren = chain;
     }
+    // 搜尋時：整個子樹（自己或任一子孫）都沒有符合關鍵字就不顯示；
+    // 但編號仍照正常順序往下算，不會因為篩掉別人而跳號，方便之後清除搜尋時對照。
+    if(q && !subtreeHasMatch(node, q)) return;
     frag.appendChild(renderNode(node, depth, numberLabel, chainForChildren, node.id === latestId));
   });
   return frag;
@@ -1307,19 +1469,27 @@ function renderNode(node, depth, numberLabel, chainForChildren, isLatest){
     hasExtraLines = true;
     const firstPart = textHtml.slice(0, splitIndex);
     const restPart = textHtml.slice(splitIndex); // 含最前面那個換行（<br> 或 \n）
-    const expanded = expandedLineIds.has(node.id);
+    // 搜尋時，如果關鍵字剛好藏在被收合的那幾行裡，自動展開讓使用者看得到，不用額外再點一次。
+    const matchInHiddenPart = searchQuery && stripHtml(restPart).toLowerCase().includes(searchQuery);
+    const expanded = expandedLineIds.has(node.id) || matchInHiddenPart;
     const lineGlyph = expanded ? '▾' : '▸';
     const lineTitle = expanded ? '收合其餘內容' : '展開其餘內容';
     textHtml = firstPart
       + ` <span class="line-toggle" data-line-toggle="${node.id}" title="${lineTitle}">${lineGlyph}</span>`
       + `<span class="extra-lines${expanded ? ' expanded' : ''}">${restPart}</span>`;
   }
+  // 搜尋時：只要子孫裡有任何一個符合關鍵字，就強制展開讓使用者看到（不會動到 node.collapsed 本身，
+  // 清除搜尋後會恢復原本手動設定的收合狀態）。
+  const childrenVisible = hasChildren && (searchQuery
+    ? node.children.some(c => subtreeHasMatch(c, searchQuery))
+    : !node.collapsed);
   if(hasChildren){
-    const glyph = node.collapsed ? '▶' : '▼';
-    const title = node.collapsed ? '展開子任務' : '隱藏子任務';
+    const glyph = childrenVisible ? '▼' : '▶';
+    const title = childrenVisible ? '隱藏子任務' : '展開子任務';
     textHtml += ` <span class="tri-end" title="${title}">${glyph}</span>`;
   }
   text.innerHTML = textHtml;
+  if(searchQuery) highlightSearchMatches(text, searchQuery);
   text.querySelectorAll('.task-ref').forEach(span => {
     span.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -1473,7 +1643,7 @@ function renderNode(node, depth, numberLabel, chainForChildren, isLatest){
     }
   });
 
-  if(hasChildren && !node.collapsed){
+  if(childrenVisible){
     const ul = document.createElement('ul');
     ul.className = 'tree';
     ul.appendChild(renderList(node.children, depth + 1, chainForChildren));
@@ -2007,6 +2177,46 @@ document.getElementById('collapseAllToggle').addEventListener('change', (e) => {
   setAllCollapsed(state.tasks, e.target.checked);
   scheduleSave();
   render();
+});
+
+/* ---- 關鍵字搜尋：純前端即時篩選，不存檔 ---- */
+const searchInputEl = document.getElementById('searchInput');
+const searchClearBtn = document.getElementById('searchClearBtn');
+searchInputEl.addEventListener('input', (e) => {
+  searchInputRaw = e.target.value;
+  searchQuery = searchInputRaw.trim().toLowerCase();
+  searchClearBtn.style.display = searchQuery ? 'inline-block' : 'none';
+  render();
+});
+searchClearBtn.addEventListener('click', () => {
+  searchInputEl.value = '';
+  searchInputRaw = '';
+  searchQuery = '';
+  searchClearBtn.style.display = 'none';
+  searchInputEl.focus();
+  render();
+});
+searchInputEl.addEventListener('keydown', (e) => {
+  if(e.key === 'Escape' && searchQuery){
+    e.preventDefault();
+    searchClearBtn.click();
+  }
+});
+
+/* ---- 主任務快速選擇：直接跳到指定主任務，不用在一長串裡面找 ---- */
+document.getElementById('rootTaskSelect').addEventListener('change', (e) => {
+  const id = e.target.value;
+  if(!id) return;
+  // 先清掉關鍵字搜尋並重繪，避免目標主任務剛好被搜尋篩掉、或畫面還停在舊的篩選結果而跳不過去
+  if(searchQuery){
+    searchInputEl.value = '';
+    searchInputRaw = '';
+    searchQuery = '';
+    searchClearBtn.style.display = 'none';
+    render();
+  }
+  scrollToTask(id);
+  e.target.value = '';
 });
 
 /* ---- 根層拖曳放置區（讓子任務可變主任務）---- */
